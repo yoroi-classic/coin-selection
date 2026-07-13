@@ -1,3 +1,80 @@
+export const transformToTrezorInputs = [
+  {
+    description: 'Transform selected utxos to trezor-connect compatible inputs',
+    utxos: [
+      {
+        address: 'addr_test1qpz5t9mdezg64tx54wmc4j92xl56h9rue2v2djzjrx2f4rqtnl9',
+        txHash:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        outputIndex: 1,
+        amount: [{ unit: 'lovelace', quantity: '5000000' }],
+      },
+      {
+        address: 'addr_test1qz4wn8j7ve6vx2sx6scpmq8sm4lq4qv0qws39m9r8ss4qlqauxg',
+        txHash:
+          'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        outputIndex: 0,
+        amount: [{ unit: 'lovelace', quantity: '3000000' }],
+      },
+    ],
+    trezorUtxos: [
+      {
+        txid: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        vout: 0,
+        path: "m/1852'/1815'/0'/0/1",
+      },
+      {
+        txid: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        vout: 1,
+        path: "m/1852'/1815'/0'/0/0",
+      },
+      {
+        txid: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+        vout: 2,
+        path: "m/1852'/1815'/0'/0/2",
+      },
+    ],
+    result: [
+      {
+        path: "m/1852'/1815'/0'/0/0",
+        prev_hash:
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        prev_index: 1,
+      },
+      {
+        path: "m/1852'/1815'/0'/0/1",
+        prev_hash:
+          'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        prev_index: 0,
+      },
+    ],
+  },
+];
+
+export const transformToTrezorInputsExceptions = [
+  {
+    description: 'Throw when a selected utxo has no trezor path metadata',
+    utxos: [
+      {
+        address: 'addr_test1qpz5t9mdezg64tx54wmc4j92xl56h9rue2v2djzjrx2f4rqtnl9',
+        txHash:
+          'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+        outputIndex: 3,
+        amount: [{ unit: 'lovelace', quantity: '1000000' }],
+      },
+    ],
+    trezorUtxos: [
+      {
+        txid: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        vout: 3,
+        path: "m/1852'/1815'/0'/0/0",
+      },
+    ],
+    error:
+      'Cannot transform utxo dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd:3',
+  },
+];
+
 export const transformToTrezorOutputs = [
   {
     description: 'Transform outputs to trezor-connect compatible output',
