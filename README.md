@@ -9,6 +9,25 @@ Under the hood it leverages Cardano Serialization Lib via WASM module.
 - Draft tx plan: Return basic information about potential transaction (such as a size and fee) even for incomplete inputs (without an recipient address or an amount)
 - Set max: Calculate the max amount of an asset that is possible to include in a transaction output
 
+## Development
+
+The current CI baseline is Node.js 22.x with Yarn 4.5.0 via Corepack.
+From a fresh checkout:
+
+```shell
+corepack enable
+yarn install --immutable
+yarn run build
+yarn run test
+yarn run lint
+yarn run type-check
+```
+
+This fork still depends on Cardano Serialization Lib. The CML migration is
+tracked in [issue #1](https://github.com/yoroi-classic/coin-selection/issues/1),
+with the current blockers documented in
+[docs/cml-migration-blocker.md](docs/cml-migration-blocker.md).
+
 ## Usage
 
 ```typescript
