@@ -1,5 +1,5 @@
-import * as CardanoWasm from '@emurgo/cardano-serialization-lib-nodejs';
-import { BigNum } from '@emurgo/cardano-serialization-lib-nodejs';
+import * as CardanoWasm from '../utils/cardano';
+import { BigNum } from '../utils/cardano';
 import { CertificateType } from '../constants';
 
 export interface Asset {

@@ -1,4 +1,4 @@
-import * as CardanoWasm from '@emurgo/cardano-serialization-lib-nodejs';
+import * as CardanoWasm from '../../../src/utils/cardano';
 import * as utils from '../../../src/utils/trezor/sign';
 import * as fixtures from './fixtures/sign';
 

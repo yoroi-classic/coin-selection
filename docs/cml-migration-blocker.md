@@ -2,10 +2,9 @@
 
 Issue: https://github.com/yoroi-classic/coin-selection/issues/1
 
-This package directly imports `@emurgo/cardano-serialization-lib-nodejs`
-from the coin-selection builders, shared Cardano helpers, constants, Trezor
-signing helpers, and test setup. The published browser build is currently
-selected with the `package.json` `browser` field.
+Runtime and test imports now enter through `src/utils/cardano.ts`, which
+currently re-exports `@emurgo/cardano-serialization-lib-nodejs`. The published
+browser build is still selected with the `package.json` `browser` field.
 
 The target packages exist as:
 
@@ -50,9 +49,9 @@ CSL surface used here.
 
 ## Safe next step
 
-The migration should be done as an explicit Cardano adapter layer rather than
-as a repo-wide import rename. That adapter should preserve the current
-coin-selection invariants first:
+The migration should replace the centralized Cardano adapter with a CML-backed
+compatibility layer rather than doing a repo-wide import rename. That adapter
+should preserve the current coin-selection invariants first:
 
 - exact selected input ordering returned from transaction bodies;
 - fee and min-ADA calculations for ADA-only, multi-asset, split-change, and
