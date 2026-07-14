@@ -1,4 +1,4 @@
-import * as CardanoWasm from '@emurgo/cardano-serialization-lib-nodejs';
+import * as CardanoWasm from '../utils/cardano';
 
 export const CertificateType = {
   STAKE_REGISTRATION: 0,

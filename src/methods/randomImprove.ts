@@ -1,5 +1,5 @@
 import { ERROR } from '../constants';
-import * as CardanoWasm from '@emurgo/cardano-serialization-lib-nodejs';
+import * as CardanoWasm from '../utils/cardano';
 import {
   CoinSelectionParams,
   CoinSelectionResult,
