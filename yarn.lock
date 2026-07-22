@@ -912,6 +912,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@dcspark/cardano-multiplatform-lib-browser@npm:6.2.0":
+  version: 6.2.0
+  resolution: "@dcspark/cardano-multiplatform-lib-browser@npm:6.2.0"
+  checksum: 10/84d4bb944b4e5da73cd3822524dd2edd498caa168c94b6e13b13d88e68bbbdca0ba4803179bcfe95ded0fed70521df4a9c3c5cb9d20c9b5ac3e7921d4e39fa7f
+  languageName: node
+  linkType: hard
+
+"@dcspark/cardano-multiplatform-lib-nodejs@npm:6.2.0":
+  version: 6.2.0
+  resolution: "@dcspark/cardano-multiplatform-lib-nodejs@npm:6.2.0"
+  checksum: 10/d61a947a619767f8647200e22297b765ca70cfd0169eab2b563fd560fc26778ca60ec4fd7bbc9d2fbfdafa2a757920a4d78d3f7b44de3742bd1c84d854e6c5d0
+  languageName: node
+  linkType: hard
+
 "@emnapi/core@npm:^1.1.0":
   version: 1.2.0
   resolution: "@emnapi/core@npm:1.2.0"
@@ -937,20 +951,6 @@ __metadata:
   dependencies:
     tslib: "npm:^2.4.0"
   checksum: 10/949f8bdcb11153d530652516b11d4b11d8c6ed48a692b4a59cbaa4305327aed59a61f0d87c366085c20ad0b0336c3b50eaddbddeeb3e8c55e7e82b583b9d98fb
-  languageName: node
-  linkType: hard
-
-"@emurgo/cardano-serialization-lib-browser@npm:^13.2.0":
-  version: 13.2.0
-  resolution: "@emurgo/cardano-serialization-lib-browser@npm:13.2.0"
-  checksum: 10/f60f47b7df9e1e783302921d9f225696d09e01b124a75dd8672effae17acdd42779da66a068c923261aabead52ac7aae9426ef13c875f48b5ef7b9d629b8b993
-  languageName: node
-  linkType: hard
-
-"@emurgo/cardano-serialization-lib-nodejs@npm:13.2.0":
-  version: 13.2.0
-  resolution: "@emurgo/cardano-serialization-lib-nodejs@npm:13.2.0"
-  checksum: 10/b8483dd74ec902da607f0ee00259674ba1794784fafd322948043dd4dfdbddecc81f6546fc98c9a57810639f91110cf76be7755a138a3506af6233954cfe449e
   languageName: node
   linkType: hard
 
@@ -1034,8 +1034,8 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@fivebinaries/coin-selection@workspace:."
   dependencies:
-    "@emurgo/cardano-serialization-lib-browser": "npm:^13.2.0"
-    "@emurgo/cardano-serialization-lib-nodejs": "npm:13.2.0"
+    "@dcspark/cardano-multiplatform-lib-browser": "npm:6.2.0"
+    "@dcspark/cardano-multiplatform-lib-nodejs": "npm:6.2.0"
     "@eslint/js": "npm:^9.11.1"
     "@swc-node/jest": "npm:^1.8.12"
     "@swc/core": "npm:1.7.26"
@@ -1044,6 +1044,7 @@ __metadata:
     "@types/node": "npm:^16.3.2"
     "@typescript-eslint/eslint-plugin": "npm:^8.8.0"
     "@typescript-eslint/parser": "npm:8.8.0"
+    bech32: "npm:2.0.0"
     eslint: "npm:^9.11.1"
     eslint-config-prettier: "npm:^9.1.0"
     eslint-plugin-import: "npm:^2.30.0"
@@ -2562,6 +2563,13 @@ __metadata:
   version: 1.0.2
   resolution: "balanced-match@npm:1.0.2"
   checksum: 10/9706c088a283058a8a99e0bf91b0a2f75497f185980d9ffa8b304de1d9e58ebda7c72c07ebf01dadedaac5b2907b2c6f566f660d62bd336c3468e960403b9d65
+  languageName: node
+  linkType: hard
+
+"bech32@npm:2.0.0":
+  version: 2.0.0
+  resolution: "bech32@npm:2.0.0"
+  checksum: 10/fa15acb270b59aa496734a01f9155677b478987b773bf701f465858bf1606c6a970085babd43d71ce61895f1baa594cb41a2cd1394bd2c6698f03cc2d811300e
   languageName: node
   linkType: hard
 

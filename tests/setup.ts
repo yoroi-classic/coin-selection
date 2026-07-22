@@ -1,9 +1,6 @@
 jest.setTimeout(30000);
 
-import {
-  BigNum,
-  TransactionBody,
-} from '../src/utils/cardano';
+import { BigNum, TransactionBody } from '../src/utils/cardano';
 import { CoinSelectionResult } from '../src/types/types';
 import { multiAssetToArray } from '../src/utils/common';
 
@@ -40,13 +37,13 @@ export const sanityCheck = (res: CoinSelectionResult): void => {
   expect(delta).toBe(0);
 
   // txBody sanity check
-  const tx = TransactionBody.from_bytes(Buffer.from(res.tx.body, 'hex'));
+  const tx = TransactionBody.from_cbor_bytes(Buffer.from(res.tx.body, 'hex'));
   expect(tx.inputs().len()).toBe(res.inputs.length);
   expect(tx.outputs().len()).toBe(res.outputs.length);
 
   for (let i = 0; i < res.outputs.length; i++) {
     // lovelace amount
-    expect(tx.outputs().get(i).amount().coin().to_str()).toBe(
+    expect(tx.outputs().get(i).amount().coin().toString()).toBe(
       res.outputs[i].amount,
     );
     // address
@@ -55,10 +52,10 @@ export const sanityCheck = (res: CoinSelectionResult): void => {
     );
     // assets
     expect(
-      multiAssetToArray(tx.outputs().get(i).amount().multiasset()),
+      multiAssetToArray(tx.outputs().get(i).amount().multi_asset()),
     ).toMatchObject(res.outputs[i].assets);
   }
 
   // fee set in txBuilder really matches fee returned in json object
-  expect(res.fee).toBe(tx.fee().to_str());
+  expect(res.fee).toBe(tx.fee().toString());
 };

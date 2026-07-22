@@ -25,6 +25,8 @@ import {
   getOutputQuantity,
   getRandomUtxo,
   orderInputs,
+  bigNumFromBigInt,
+  outputBuilderResult,
 } from '../utils/common';
 import { CoinSelectionError } from '../utils/errors';
 import { getLogger } from '../utils/logger';
@@ -77,7 +79,7 @@ const selection = (
   );
   preparedOutputs.forEach(output => {
     const txOutput = buildTxOutput(output, dummyAddress);
-    txBuilder.add_output(txOutput);
+    txBuilder.add_output(outputBuilderResult(txOutput));
   });
   // Check for UTXO_BALANCE_INSUFFICIENT comparing provided inputs with requested outputs
   const assetsRemaining = getUnsatisfiedAssets(utxoSelected, preparedOutputs);
@@ -105,8 +107,8 @@ const selection = (
           )
         ) {
           utxoSelected.push(utxo);
-          const { input, address, amount } = buildTxInput(utxo);
-          txBuilder.add_regular_input(address, input, amount);
+          const { builderResult } = buildTxInput(utxo);
+          txBuilder.add_input(builderResult);
           utxoRemaining.splice(utxoRemaining.indexOf(utxo), 1);
         } else {
           // The selection was not improved by including
@@ -138,7 +140,7 @@ const calculateChange = (
   maxTokensPerOutput: number | undefined,
   txBuilder: CardanoWasm.TransactionBuilder,
 ): { changeOutputs: OutputCost[] } => {
-  const totalFeesAmount = txBuilder.min_fee();
+  const totalFeesAmount = bigNumFromBigInt(txBuilder.min_fee(false));
   const totalUserOutputsAmount = getUserOutputQuantityWithDeposit(
     preparedOutputs,
     0,
@@ -168,7 +170,7 @@ const calculateChange = (
   changeOutputs.forEach(changeOutput => {
     // we need to cover amounts and fees for change outputs
     requiredAmount = requiredAmount
-      .checked_add(changeOutput.output.amount().coin())
+      .checked_add(bigNumFromBigInt(changeOutput.output.amount().coin()))
       .checked_add(changeOutput.outputFee);
   });
 
@@ -210,7 +212,7 @@ export const randomImprove = (
   }
   const txBuilder = getTxBuilder(options?.feeParams?.a);
   if (ttl) {
-    txBuilder.set_ttl(ttl);
+    txBuilder.set_ttl(BigInt(ttl));
   }
 
   const { utxoSelected, utxoRemaining, preparedOutputs } = selection(
@@ -234,12 +236,12 @@ export const randomImprove = (
   changeOutputs.forEach(change => {
     const ch = {
       isChange: true,
-      amount: change.output.amount().coin().to_str(),
+      amount: change.output.amount().coin().toString(),
       address: changeAddress,
-      assets: multiAssetToArray(change.output.amount().multiasset()),
+      assets: multiAssetToArray(change.output.amount().multi_asset()),
     };
     finalOutputs.push(ch);
-    txBuilder.add_output(buildTxOutput(ch, changeAddress));
+    txBuilder.add_output(outputBuilderResult(buildTxOutput(ch, changeAddress)));
   });
 
   const totalUserOutputsAmount = getUserOutputQuantityWithDeposit(
@@ -252,14 +254,15 @@ export const randomImprove = (
   const fee = totalInput.checked_sub(totalOutput);
   const totalSpent = totalUserOutputsAmount.checked_add(fee);
 
-  txBuilder.set_fee(fee);
-  const txBody = txBuilder.build();
-  const txHash = CardanoWasm.FixedTransaction.new_from_body_bytes(
-    txBody.to_bytes(),
-  )
-    .transaction_hash()
-    .to_hex();
-  const txBodyHex = Buffer.from(txBody.to_bytes()).toString('hex');
+  txBuilder.set_fee(fee.to_bigint());
+  const txBody = txBuilder
+    .build(
+      CardanoWasm.ChangeSelectionAlgo.Default,
+      CardanoWasm.Address.from_bech32(changeAddress),
+    )
+    .body();
+  const txHash = CardanoWasm.hash_transaction(txBody).to_hex();
+  const txBodyHex = Buffer.from(txBody.to_cbor_bytes()).toString('hex');
 
   // reorder inputs to match order within tx
   const orderedInputs = orderInputs(utxoSelected, txBody);

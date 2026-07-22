@@ -1,125 +1,91 @@
 import * as Cardano from '../../src/utils/cardano';
+import {
+  bigNumFromStr,
+  buildMultiAsset,
+  buildTxOutput,
+  getNetworkId,
+  getProtocolMagic,
+  multiAssetToArray,
+} from '../../src/utils/common';
+import { DATA_COST_PER_UTXO_BYTE } from '../../src/constants';
 
-describe('cardano serialization adapter', () => {
+describe('CML cardano adapter', () => {
   const shelleyAddress =
     'addr1q8u2f05rprqjhygz22m06mhy4xrnqvqqpyuzhmxqfxnwvxz8d2kd47hsre5v9urjyu8s0ryk38dxzw0t5jesncw4v90s22tk0f';
 
-  test('exposes the numeric and builder primitives used by coin-selection', () => {
-    const feeA = Cardano.BigNum.from_str('44');
-    const feeB = Cardano.BigNum.from_str('155381');
-
-    const config = Cardano.TransactionBuilderConfigBuilder.new()
-      .fee_algo(Cardano.LinearFee.new(feeA, feeB))
-      .pool_deposit(Cardano.BigNum.from_str('500000000'))
-      .key_deposit(Cardano.BigNum.from_str('2000000'))
-      .coins_per_utxo_byte(Cardano.BigNum.from_str('4310'))
-      .max_value_size(5000)
-      .max_tx_size(16384)
-      .build();
-
-    expect(feeA.checked_add(feeB).to_str()).toBe('155425');
-    expect(config).toBeDefined();
-    expect(Cardano.NetworkInfo.mainnet().network_id()).toBe(1);
-  });
-
-  test('backs every declared compatibility export at runtime', () => {
-    Cardano.CARDANO_SERIALIZATION_COMPAT_EXPORTS.forEach(exportName => {
-      expect(Cardano[exportName]).toBeDefined();
-    });
-  });
-
-  test('preserves the legacy BigNum arithmetic surface', () => {
-    const oneAda = Cardano.BigNum.from_str('1000000');
-    const halfAda = Cardano.BigNum.from_str('500000');
+  test('preserves exact unsigned integer arithmetic', () => {
+    const oneAda = bigNumFromStr('1000000');
+    const halfAda = bigNumFromStr('500000');
 
     expect(oneAda.checked_add(halfAda).to_str()).toBe('1500000');
     expect(oneAda.checked_sub(halfAda).to_str()).toBe('500000');
-    expect(halfAda.checked_mul(Cardano.BigNum.from_str('3')).to_str()).toBe(
-      '1500000',
-    );
+    expect(halfAda.checked_mul(bigNumFromStr('3')).to_str()).toBe('1500000');
     expect(halfAda.clamped_sub(oneAda).to_str()).toBe('0');
     expect(oneAda.compare(halfAda)).toBe(1);
+    expect(() => halfAda.checked_sub(oneAda)).toThrow('BigNum underflow');
   });
 
-  test('preserves multi-asset value and min-ada output behavior', () => {
-    const policy = Cardano.ScriptHash.from_bytes(
-      Buffer.from('00'.repeat(28), 'hex'),
+  test('keeps arithmetic exact beyond Number.MAX_SAFE_INTEGER', () => {
+    const value = bigNumFromStr('9007199254740993123456789');
+
+    expect(value.checked_add(bigNumFromStr('11')).to_str()).toBe(
+      '9007199254740993123456800',
     );
-    const assetName = Cardano.AssetName.new(Buffer.from('544f4b454e', 'hex'));
-    const assets = Cardano.Assets.new();
-    assets.insert(assetName, Cardano.BigNum.from_str('1234'));
-
-    const multiAsset = Cardano.MultiAsset.new();
-    multiAsset.insert(policy, assets);
-
-    const value = Cardano.Value.new(Cardano.BigNum.from_str('2000000'));
-    value.set_multiasset(multiAsset);
-
-    const output = Cardano.TransactionOutput.new(
-      Cardano.Address.from_bech32(shelleyAddress),
-      value,
+    expect(value.checked_sub(bigNumFromStr('89')).to_str()).toBe(
+      '9007199254740993123456700',
     );
-    const minAda = Cardano.min_ada_for_output(
-      output,
-      Cardano.DataCost.new_coins_per_byte(Cardano.BigNum.from_str('4310')),
+    expect(value.checked_mul(bigNumFromStr('3')).to_str()).toBe(
+      '27021597764222979370370367',
     );
-
-    expect(output.amount().coin().to_str()).toBe('2000000');
-    expect(output.amount().multiasset()?.len()).toBe(1);
-    expect(minAda.compare(Cardano.BigNum.from_str('0'))).toBeGreaterThan(0);
   });
 
-  test('preserves transaction input, body, hash, and witness primitives', () => {
-    const input = Cardano.TransactionInput.new(
-      Cardano.TransactionHash.from_bytes(Buffer.from('11'.repeat(32), 'hex')),
-      2,
+  test('uses the expected mainnet, preprod, and preview network constants', () => {
+    expect(Cardano.NetworkInfo.mainnet().network_id()).toBe(1);
+    expect(Cardano.NetworkInfo.mainnet().protocol_magic().to_int()).toBe(
+      764824073,
     );
-    const address = Cardano.Address.from_bech32(shelleyAddress);
-    const inputValue = Cardano.Value.new(Cardano.BigNum.from_str('5000000'));
-    const output = Cardano.TransactionOutput.new(
-      address,
-      Cardano.Value.new(Cardano.BigNum.from_str('4800000')),
-    );
-    const txBuilder = Cardano.TransactionBuilder.new(
-      Cardano.TransactionBuilderConfigBuilder.new()
-        .fee_algo(
-          Cardano.LinearFee.new(
-            Cardano.BigNum.from_str('44'),
-            Cardano.BigNum.from_str('155381'),
-          ),
-        )
-        .pool_deposit(Cardano.BigNum.from_str('500000000'))
-        .key_deposit(Cardano.BigNum.from_str('2000000'))
-        .coins_per_utxo_byte(Cardano.BigNum.from_str('4310'))
-        .max_value_size(5000)
-        .max_tx_size(16384)
-        .build(),
-    );
+    expect(Cardano.NetworkInfo.preprod().network_id()).toBe(0);
+    expect(Cardano.NetworkInfo.preprod().protocol_magic().to_int()).toBe(1);
+    expect(Cardano.NetworkInfo.preview().network_id()).toBe(0);
+    expect(Cardano.NetworkInfo.preview().protocol_magic().to_int()).toBe(2);
 
-    txBuilder.add_regular_input(address, input, inputValue);
-    txBuilder.add_output(output);
-    txBuilder.set_fee(Cardano.BigNum.from_str('200000'));
+    expect(getNetworkId()).toBe(1);
+    expect(getNetworkId(false)).toBe(1);
+    expect(getNetworkId(true)).toBe(0);
+    expect(getProtocolMagic().to_int()).toBe(764824073);
+    expect(getProtocolMagic(false).to_int()).toBe(764824073);
+    expect(getProtocolMagic(true).to_int()).toBe(2);
+  });
 
-    const body = txBuilder.build();
-    const parsedBody = Cardano.TransactionBody.from_bytes(body.to_bytes());
-    const transaction = Cardano.Transaction.new(
-      parsedBody,
-      Cardano.TransactionWitnessSet.new(),
-    );
-    const parsedTransaction = Cardano.Transaction.from_bytes(
-      transaction.to_bytes(),
-    );
+  test('round-trips multi-assets with exact quantities', () => {
+    const assets = [
+      {
+        unit: `${'00'.repeat(28)}544f4b454e`,
+        quantity: '1234',
+      },
+    ];
 
-    expect(parsedBody.inputs().get(0).index()).toBe(2);
-    expect(parsedBody.outputs().get(0).amount().coin().to_str()).toBe(
-      '4800000',
+    expect(multiAssetToArray(buildMultiAsset(assets))).toEqual(assets);
+  });
+
+  test('builds a CML output with its exact minimum ADA requirement', () => {
+    const output = buildTxOutput(
+      {
+        address: shelleyAddress,
+        amount: '0',
+        assets: [
+          {
+            unit: `${'00'.repeat(28)}544f4b454e`,
+            quantity: '1234',
+          },
+        ],
+      },
+      shelleyAddress,
     );
-    expect(parsedBody.fee().to_str()).toBe('200000');
-    expect(
-      Cardano.FixedTransaction.new_from_body_bytes(parsedBody.to_bytes())
-        .transaction_hash()
-        .to_hex(),
-    ).toHaveLength(64);
-    expect(parsedTransaction.body().fee().to_str()).toBe('200000');
+    const minimum = Cardano.min_ada_required(output, DATA_COST_PER_UTXO_BYTE);
+
+    expect(output.amount().coin()).toBe(minimum);
+    expect(output.amount().multi_asset().policy_count()).toBe(1);
+    expect(minimum).toBeGreaterThan(BigInt(0));
   });
 });

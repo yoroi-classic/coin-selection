@@ -22,6 +22,14 @@ import { CoinSelectionError } from './errors';
 export const bigNumFromStr = (num: string): CardanoWasm.BigNum =>
   CardanoWasm.BigNum.from_str(num);
 
+export const bigNumFromBigInt = (num: bigint): CardanoWasm.BigNum =>
+  CardanoWasm.BigNum.from_bigint(num);
+
+export const outputBuilderResult = (
+  output: CardanoWasm.TransactionOutput,
+): CardanoWasm.SingleOutputBuilderResult =>
+  CardanoWasm.SingleOutputBuilderResult.new(output);
+
 export const getProtocolMagic = (
   tesnet?: boolean,
 ):
@@ -59,26 +67,13 @@ export const parseAsset = (
 
 export const buildMultiAsset = (assets: Asset[]): CardanoWasm.MultiAsset => {
   const multiAsset = CardanoWasm.MultiAsset.new();
-  const assetsGroupedByPolicy: {
-    [policyId: string]: CardanoWasm.Assets;
-  } = {};
   assets.forEach(assetEntry => {
     const { policyId, assetNameInHex } = parseAsset(assetEntry.unit);
-    if (!assetsGroupedByPolicy[policyId]) {
-      assetsGroupedByPolicy[policyId] = CardanoWasm.Assets.new();
-    }
-    const assets = assetsGroupedByPolicy[policyId];
-    assets.insert(
-      CardanoWasm.AssetName.new(Buffer.from(assetNameInHex, 'hex')),
-      bigNumFromStr(assetEntry.quantity || '0'), // fallback for an empty string
+    multiAsset.set(
+      CardanoWasm.ScriptHash.from_raw_bytes(Buffer.from(policyId, 'hex')),
+      CardanoWasm.AssetName.from_raw_bytes(Buffer.from(assetNameInHex, 'hex')),
+      BigInt(assetEntry.quantity || '0'), // fallback for an empty string
     );
-  });
-
-  Object.keys(assetsGroupedByPolicy).forEach(policyId => {
-    const scriptHash = CardanoWasm.ScriptHash.from_bytes(
-      Buffer.from(policyId, 'hex'),
-    );
-    multiAsset.insert(scriptHash, assetsGroupedByPolicy[policyId]);
   });
   return multiAsset;
 };
@@ -92,20 +87,22 @@ export const multiAssetToArray = (
 
   for (let i = 0; i < policyHashes.len(); i++) {
     const policyId = policyHashes.get(i);
-    const assetsInPolicy = multiAsset.get(policyId);
+    const assetsInPolicy = multiAsset.get_assets(policyId);
     if (!assetsInPolicy) continue;
 
     const assetNames = assetsInPolicy.keys();
     for (let j = 0; j < assetNames.len(); j++) {
       const assetName = assetNames.get(j);
       const amount = assetsInPolicy.get(assetName);
-      if (!amount) continue;
+      if (amount === undefined) continue;
 
-      const policyIdHex = Buffer.from(policyId.to_bytes()).toString('hex');
-      const assetNameHex = Buffer.from(assetName.name()).toString('hex');
+      const policyIdHex = Buffer.from(policyId.to_raw_bytes()).toString('hex');
+      const assetNameHex = Buffer.from(assetName.to_raw_bytes()).toString(
+        'hex',
+      );
 
       assetsArray.push({
-        quantity: amount.to_str(),
+        quantity: amount.toString(),
         unit: `${policyIdHex}${assetNameHex}`,
       });
     }
@@ -163,22 +160,28 @@ export const buildTxInput = (
   input: CardanoWasm.TransactionInput;
   address: CardanoWasm.Address;
   amount: CardanoWasm.Value;
+  builderResult: CardanoWasm.InputBuilderResult;
 } => {
   const input = CardanoWasm.TransactionInput.new(
-    CardanoWasm.TransactionHash.from_bytes(Buffer.from(utxo.txHash, 'hex')),
-    utxo.outputIndex,
+    CardanoWasm.TransactionHash.from_raw_bytes(Buffer.from(utxo.txHash, 'hex')),
+    BigInt(utxo.outputIndex),
   );
 
-  const amount = CardanoWasm.Value.new(bigNumFromStr(getAssetAmount(utxo)));
+  let amount = CardanoWasm.Value.from_coin(BigInt(getAssetAmount(utxo)));
   const assets = utxo.amount.filter(a => a.unit !== 'lovelace');
   if (assets.length > 0) {
     const multiAsset = buildMultiAsset(assets);
-    amount.set_multiasset(multiAsset);
+    amount = CardanoWasm.Value.new(amount.coin(), multiAsset);
   }
 
   const address = CardanoWasm.Address.from_bech32(utxo.address);
 
-  return { input, address, amount };
+  const builderResult = CardanoWasm.SingleInputBuilder.new(
+    input,
+    CardanoWasm.TransactionOutput.new(address, amount),
+  ).payment_key();
+
+  return { input, address, amount, builderResult };
 };
 
 export const buildTxOutput = (
@@ -198,25 +201,27 @@ export const buildTxOutput = (
     : bigNumFromStr('0');
 
   // Create Value including assets
-  let outputValue = CardanoWasm.Value.new(outputAmount);
+  let outputValue = CardanoWasm.Value.from_coin(outputAmount.to_bigint());
   const multiAsset =
     output.assets.length > 0 ? buildMultiAsset(output.assets) : null;
   if (multiAsset) {
-    outputValue.set_multiasset(multiAsset);
+    outputValue = CardanoWasm.Value.new(outputAmount.to_bigint(), multiAsset);
   }
 
   // Calculate min required ADA for the output
   let txOutput = CardanoWasm.TransactionOutput.new(outputAddr, outputValue);
-  const minAdaRequired = CardanoWasm.min_ada_for_output(
-    txOutput,
-    DATA_COST_PER_UTXO_BYTE,
+  const minAdaRequired = bigNumFromBigInt(
+    CardanoWasm.min_ada_required(txOutput, DATA_COST_PER_UTXO_BYTE),
   );
 
   // If calculated min required ada is greater than current output value than adjust it
   if (outputAmount.compare(minAdaRequired) < 0) {
-    outputValue = CardanoWasm.Value.new(minAdaRequired);
+    outputValue = CardanoWasm.Value.from_coin(minAdaRequired.to_bigint());
     if (multiAsset) {
-      outputValue.set_multiasset(multiAsset);
+      outputValue = CardanoWasm.Value.new(
+        minAdaRequired.to_bigint(),
+        multiAsset,
+      );
     }
     txOutput = CardanoWasm.TransactionOutput.new(outputAddr, outputValue);
   }
@@ -230,10 +235,11 @@ export const getOutputCost = (
   dummyAddress: string,
 ): OutputCost => {
   const txOutput = buildTxOutput(output, dummyAddress);
-  const outputFee = txBuilder.fee_for_output(txOutput);
-  const minAda = CardanoWasm.min_ada_for_output(
-    txOutput,
-    DATA_COST_PER_UTXO_BYTE,
+  const outputFee = bigNumFromBigInt(
+    txBuilder.fee_for_output(outputBuilderResult(txOutput)),
+  );
+  const minAda = bigNumFromBigInt(
+    CardanoWasm.min_ada_required(txOutput, DATA_COST_PER_UTXO_BYTE),
   );
 
   return {
@@ -245,8 +251,8 @@ export const getOutputCost = (
 
 export const prepareWithdrawals = (
   withdrawals: Withdrawal[],
-): CardanoWasm.Withdrawals => {
-  const preparedWithdrawals = CardanoWasm.Withdrawals.new();
+): CardanoWasm.WithdrawalBuilderResult[] => {
+  const preparedWithdrawals: CardanoWasm.WithdrawalBuilderResult[] = [];
 
   withdrawals.forEach(withdrawal => {
     const rewardAddress = CardanoWasm.RewardAddress.from_address(
@@ -254,9 +260,11 @@ export const prepareWithdrawals = (
     );
 
     if (rewardAddress) {
-      preparedWithdrawals.insert(
-        rewardAddress,
-        bigNumFromStr(withdrawal.amount),
+      preparedWithdrawals.push(
+        CardanoWasm.SingleWithdrawalBuilder.new(
+          rewardAddress,
+          BigInt(withdrawal.amount),
+        ).payment_key(),
       );
     }
   });
@@ -267,38 +275,38 @@ export const prepareWithdrawals = (
 export const prepareCertificates = (
   certificates: Certificate[],
   accountKey: CardanoWasm.Bip32PublicKey,
-): CardanoWasm.Certificates => {
-  const preparedCertificates = CardanoWasm.Certificates.new();
+): CardanoWasm.CertificateBuilderResult[] => {
+  const preparedCertificates: CardanoWasm.CertificateBuilderResult[] = [];
   if (certificates.length === 0) return preparedCertificates;
 
   const stakeKey = accountKey.derive(2).derive(0);
-  const stakeCred = CardanoWasm.Credential.from_keyhash(
+  const stakeCred = CardanoWasm.Credential.new_pub_key(
     stakeKey.to_raw_key().hash(),
   );
 
   certificates.forEach(cert => {
     if (cert.type === CertificateType.STAKE_REGISTRATION) {
-      preparedCertificates.add(
-        CardanoWasm.Certificate.new_stake_registration(
-          CardanoWasm.StakeRegistration.new(stakeCred),
-        ),
+      preparedCertificates.push(
+        CardanoWasm.SingleCertificateBuilder.new(
+          CardanoWasm.Certificate.new_stake_registration(stakeCred),
+        ).skip_witness(),
       );
     } else if (cert.type === CertificateType.STAKE_DELEGATION) {
-      preparedCertificates.add(
-        CardanoWasm.Certificate.new_stake_delegation(
-          CardanoWasm.StakeDelegation.new(
+      preparedCertificates.push(
+        CardanoWasm.SingleCertificateBuilder.new(
+          CardanoWasm.Certificate.new_stake_delegation(
             stakeCred,
-            CardanoWasm.Ed25519KeyHash.from_bytes(
+            CardanoWasm.Ed25519KeyHash.from_raw_bytes(
               Buffer.from(cert.pool, 'hex'),
             ),
           ),
-        ),
+        ).payment_key(),
       );
     } else if (cert.type === CertificateType.STAKE_DEREGISTRATION) {
-      preparedCertificates.add(
-        CardanoWasm.Certificate.new_stake_deregistration(
-          CardanoWasm.StakeDeregistration.new(stakeCred),
-        ),
+      preparedCertificates.push(
+        CardanoWasm.SingleCertificateBuilder.new(
+          CardanoWasm.Certificate.new_stake_deregistration(stakeCred),
+        ).payment_key(),
       );
     } else if (cert.type === CertificateType.VOTE_DELEGATION) {
       let targetDRep: CardanoWasm.DRep;
@@ -310,22 +318,22 @@ export const prepareCertificates = (
           targetDRep = CardanoWasm.DRep.new_always_no_confidence();
           break;
         case CardanoDRepType.KEY_HASH:
-          targetDRep = CardanoWasm.DRep.new_key_hash(
+          targetDRep = CardanoWasm.DRep.new_key(
             CardanoWasm.Ed25519KeyHash.from_hex(cert.dRep.keyHash),
           );
           break;
         case CardanoDRepType.SCRIPT_HASH:
-          targetDRep = CardanoWasm.DRep.new_script_hash(
+          targetDRep = CardanoWasm.DRep.new_script(
             CardanoWasm.ScriptHash.from_hex(cert.dRep.scriptHash),
           );
           break;
       }
 
       if (targetDRep) {
-        preparedCertificates.add(
-          CardanoWasm.Certificate.new_vote_delegation(
-            CardanoWasm.VoteDelegation.new(stakeCred, targetDRep),
-          ),
+        preparedCertificates.push(
+          CardanoWasm.SingleCertificateBuilder.new(
+            CardanoWasm.Certificate.new_vote_deleg_cert(stakeCred, targetDRep),
+          ).payment_key(),
         );
       }
     } else {
@@ -407,19 +415,16 @@ export const splitChangeOutput = (
   maxTokensPerOutput = MAX_TOKENS_PER_OUTPUT,
 ): OutputCost[] => {
   // TODO: https://github.com/Emurgo/cardano-serialization-lib/pull/236
-  const multiAsset = singleChangeOutput.output.amount().multiasset();
-  if (!multiAsset || (multiAsset && multiAsset.len() < maxTokensPerOutput)) {
+  const multiAsset = singleChangeOutput.output.amount().multi_asset();
+  const allAssets = multiAssetToArray(multiAsset);
+  if (allAssets.length <= maxTokensPerOutput) {
     return [singleChangeOutput];
   }
 
-  let lovelaceAvailable = singleChangeOutput.output
-    .amount()
-    .coin()
-    .checked_add(singleChangeOutput.outputFee);
+  let lovelaceAvailable = bigNumFromBigInt(
+    singleChangeOutput.output.amount().coin(),
+  ).checked_add(singleChangeOutput.outputFee);
 
-  const allAssets = multiAssetToArray(
-    singleChangeOutput.output.amount().multiasset(),
-  );
   const nAssetBundles = Math.ceil(allAssets.length / maxTokensPerOutput);
 
   const changeOutputs: ChangeOutput[] = [];
@@ -430,7 +435,8 @@ export const splitChangeOutput = (
       (i + 1) * maxTokensPerOutput,
     );
 
-    const outputValue = CardanoWasm.Value.new_from_assets(
+    const outputValue = CardanoWasm.Value.new(
+      BigInt(0),
       buildMultiAsset(assetsBundle),
     );
     const txOutput = CardanoWasm.TransactionOutput.new(
@@ -438,9 +444,8 @@ export const splitChangeOutput = (
       outputValue,
     );
 
-    const minAdaRequired = CardanoWasm.min_ada_for_output(
-      txOutput,
-      DATA_COST_PER_UTXO_BYTE,
+    const minAdaRequired = bigNumFromBigInt(
+      CardanoWasm.min_ada_required(txOutput, DATA_COST_PER_UTXO_BYTE),
     );
 
     changeOutputs.push({
@@ -552,7 +557,7 @@ export const prepareChangeOutput = (
     const utxo = pickAdditionalUtxo();
     if (utxo) {
       utxo.addUtxo();
-      const newTotalFee = txBuilder.min_fee();
+      const newTotalFee = bigNumFromBigInt(txBuilder.min_fee(false));
       return prepareChangeOutput(
         txBuilder,
         usedUtxos,
@@ -597,14 +602,22 @@ export const prepareChangeOutput = (
 export const getTxBuilder = (a = '44'): CardanoWasm.TransactionBuilder =>
   CardanoWasm.TransactionBuilder.new(
     CardanoWasm.TransactionBuilderConfigBuilder.new()
-      .fee_algo(
-        CardanoWasm.LinearFee.new(bigNumFromStr(a), bigNumFromStr('155381')),
-      )
-      .pool_deposit(bigNumFromStr('500000000'))
-      .key_deposit(bigNumFromStr('2000000'))
-      .coins_per_utxo_byte(bigNumFromStr(CARDANO_PARAMS.COINS_PER_UTXO_BYTE))
+      .fee_algo(CardanoWasm.LinearFee.new(BigInt(a), BigInt(155381), BigInt(0)))
+      .pool_deposit(BigInt(500000000))
+      .key_deposit(BigInt(2000000))
+      .coins_per_utxo_byte(BigInt(CARDANO_PARAMS.COINS_PER_UTXO_BYTE))
       .max_value_size(CARDANO_PARAMS.MAX_VALUE_SIZE)
       .max_tx_size(CARDANO_PARAMS.MAX_TX_SIZE)
+      .prefer_pure_change(false)
+      .ex_unit_prices(
+        CardanoWasm.ExUnitPrices.new(
+          CardanoWasm.Rational.new(BigInt(0), BigInt(1)),
+          CardanoWasm.Rational.new(BigInt(0), BigInt(1)),
+        ),
+      )
+      .cost_models(CardanoWasm.CostModels.from_json('{}'))
+      .collateral_percentage(150)
+      .max_collateral_inputs(3)
       .build(),
   );
 
@@ -675,7 +688,7 @@ export const setMaxOutput = (
   let newMaxAmount = bigNumFromStr('0');
 
   const changeOutputAssets = multiAssetToArray(
-    changeOutput?.output.amount().multiasset(),
+    changeOutput?.output.amount().multi_asset(),
   );
 
   if (maxOutputAsset === 'lovelace') {
@@ -687,7 +700,7 @@ export const setMaxOutput = (
         maxOutput,
         maxOutput.address ?? changeOutput.output.address().to_bech32(),
       );
-      newMaxAmount = changeOutput.output.amount().coin();
+      newMaxAmount = bigNumFromBigInt(changeOutput.output.amount().coin());
 
       if (changeOutputAssets.length === 0) {
         // Add a fee that was previously consumed by the dummy max output.
@@ -702,11 +715,10 @@ export const setMaxOutput = (
 
         const txOutput = CardanoWasm.TransactionOutput.new(
           changeOutput.output.address(),
-          CardanoWasm.Value.new(newMaxAmount),
+          CardanoWasm.Value.from_coin(newMaxAmount.to_bigint()),
         );
-        const minUtxoVal = CardanoWasm.min_ada_for_output(
-          txOutput,
-          DATA_COST_PER_UTXO_BYTE,
+        const minUtxoVal = bigNumFromBigInt(
+          CardanoWasm.min_ada_required(txOutput, DATA_COST_PER_UTXO_BYTE),
         );
 
         if (newMaxAmount.compare(minUtxoVal) < 0) {
@@ -728,15 +740,14 @@ export const setMaxOutput = (
 
       const txOutput = CardanoWasm.TransactionOutput.new(
         changeOutput.output.address(),
-        // new_from_assets does not automatically include required ADA
-        CardanoWasm.Value.new_from_assets(buildMultiAsset(maxOutput.assets)),
+        CardanoWasm.Value.new(BigInt(0), buildMultiAsset(maxOutput.assets)),
       );
 
       // adjust ADA amount to cover min ada for the asset
-      maxOutput.amount = CardanoWasm.min_ada_for_output(
+      maxOutput.amount = CardanoWasm.min_ada_required(
         txOutput,
         DATA_COST_PER_UTXO_BYTE,
-      ).to_str();
+      ).toString();
     }
   }
 
@@ -775,8 +786,8 @@ export const getRandomUtxo = (
     utxo,
     addUtxo: () => {
       utxoSelected.push(utxo);
-      const { input, address, amount } = buildTxInput(utxo);
-      txBuilder.add_regular_input(address, input, amount);
+      const { builderResult } = buildTxInput(utxo);
+      txBuilder.add_input(builderResult);
       utxoRemaining.splice(utxoRemaining.indexOf(utxo), 1);
     },
   };
@@ -808,9 +819,9 @@ export const orderInputs = (
   const orderedInputs: Utxo[] = [];
   for (let i = 0; i < txBody.inputs().len(); i++) {
     const txid = Buffer.from(
-      txBody.inputs().get(i).transaction_id().to_bytes(),
+      txBody.inputs().get(i).transaction_id().to_raw_bytes(),
     ).toString('hex');
-    const outputIndex = txBody.inputs().get(i).index();
+    const outputIndex = Number(txBody.inputs().get(i).index());
     const utxo = inputsToOrder.find(
       uu => uu.txHash === txid && uu.outputIndex === outputIndex,
     );

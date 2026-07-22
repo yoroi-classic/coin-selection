@@ -344,20 +344,20 @@ export const coinSelection = [
               unit: '57fca08abbaddee36da742a839f7d83a7e1d2419f1507fcbf39165224d494e54',
             },
             {
-              quantity: '20000',
-              unit: '57fca08abbaddee36da742a839f7d83a7e1d2419f1507fcbf391652256414e494c',
-            },
-            {
               quantity: '1000000',
               unit: '57fca08abbaddee36da742a839f7d83a7e1d2419f1507fcbf3916522534245525259',
             },
             {
-              quantity: '1',
-              unit: '6b8d07d69639e9413dd637a1a815a7323c69c86abbafb66dbfdb1aa7',
+              quantity: '20000',
+              unit: '57fca08abbaddee36da742a839f7d83a7e1d2419f1507fcbf391652256414e494c',
             },
             {
               quantity: '100000',
               unit: '769c4c6e9bc3ba5406b9b89fb7beb6819e638ff2e2de63f008d5bcff744e45574d',
+            },
+            {
+              quantity: '1',
+              unit: '6b8d07d69639e9413dd637a1a815a7323c69c86abbafb66dbfdb1aa7',
             },
           ],
         },
