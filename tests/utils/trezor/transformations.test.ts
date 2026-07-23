@@ -35,4 +35,20 @@ describe('trezor transformation utils', () => {
       expect(utils.drepIdToHex(f.drepId)).toStrictEqual(f.result);
     });
   });
+
+  test('drepIdToHex does not require the Node Buffer global', () => {
+    const globalWithBuffer = globalThis as {
+      Buffer?: typeof Buffer;
+    };
+    const buffer = globalWithBuffer.Buffer;
+    delete globalWithBuffer.Buffer;
+
+    try {
+      expect(utils.drepIdToHex(fixtures.drepIdToHex[0].drepId)).toStrictEqual(
+        fixtures.drepIdToHex[0].result,
+      );
+    } finally {
+      globalWithBuffer.Buffer = buffer;
+    }
+  });
 });

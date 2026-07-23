@@ -27,9 +27,10 @@ former CSL surface. The migration therefore keeps those differences internal.
   change selection use CML's native APIs. Builder calls use
   `SingleInputBuilder`, `SingleOutputBuilderResult`,
   `SingleCertificateBuilder`, and `SingleWithdrawalBuilder`.
-- CML iterates multi-assets in canonical map order. Result arrays consequently
-  use canonical policy/asset ordering while retaining the same units and exact
-  quantities.
+- The adapter inserts multi-assets in canonical CBOR map order (policy bytes,
+  then asset-name encoded length and bytes). CML-derived and change-output
+  arrays consequently use that same ordering while retaining the same units
+  and exact quantities.
 - CML renamed the test-network helpers to `preprod` and `preview`; the existing
   network constants remain unchanged.
 - CML does not parse legacy `drep` and `drep_script` bech32 identifiers. A small

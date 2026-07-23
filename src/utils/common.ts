@@ -67,11 +67,31 @@ export const parseAsset = (
 
 export const buildMultiAsset = (assets: Asset[]): CardanoWasm.MultiAsset => {
   const multiAsset = CardanoWasm.MultiAsset.new();
-  assets.forEach(assetEntry => {
-    const { policyId, assetNameInHex } = parseAsset(assetEntry.unit);
+  const parsedAssets = assets
+    .map(assetEntry => {
+      const { policyId, assetNameInHex } = parseAsset(assetEntry.unit);
+      return {
+        assetEntry,
+        policyId: Buffer.from(policyId, 'hex'),
+        assetName: Buffer.from(assetNameInHex, 'hex'),
+      };
+    })
+    .sort((left, right) => {
+      const policyOrder = Buffer.compare(left.policyId, right.policyId);
+      if (policyOrder !== 0) return policyOrder;
+
+      // Canonical CBOR orders byte-string map keys by encoded length, then bytes.
+      const assetNameLengthOrder =
+        left.assetName.length - right.assetName.length;
+      return (
+        assetNameLengthOrder || Buffer.compare(left.assetName, right.assetName)
+      );
+    });
+
+  parsedAssets.forEach(({ assetEntry, policyId, assetName }) => {
     multiAsset.set(
-      CardanoWasm.ScriptHash.from_raw_bytes(Buffer.from(policyId, 'hex')),
-      CardanoWasm.AssetName.from_raw_bytes(Buffer.from(assetNameInHex, 'hex')),
+      CardanoWasm.ScriptHash.from_raw_bytes(policyId),
+      CardanoWasm.AssetName.from_raw_bytes(assetName),
       BigInt(assetEntry.quantity || '0'), // fallback for an empty string
     );
   });

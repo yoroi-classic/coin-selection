@@ -72,6 +72,51 @@ describe('common utils', () => {
     expect(splitCost).toBe(originalCost);
   });
 
+  test.each([
+    { assetCount: 50, expectedBundleSizes: [50] },
+    { assetCount: 51, expectedBundleSizes: [50, 1] },
+  ])(
+    'splitChangeOutput keeps at most 50 assets for $assetCount assets',
+    ({ assetCount, expectedBundleSizes }) => {
+      const policyId =
+        '02477d7c23b4c2834b0be8ca8578dde47af0cc82a964688f6fc95a7a';
+      const assets = Array.from({ length: assetCount }, (_, index) => ({
+        quantity: '1',
+        unit: `${policyId}${index.toString(16).padStart(2, '0')}`,
+      }));
+      const txBuilder = utils.getTxBuilder();
+      const original = utils.getOutputCost(
+        txBuilder,
+        {
+          address: changeAddress,
+          amount: '100000000',
+          assets,
+          setMax: false,
+        },
+        changeAddress,
+      );
+
+      const split = utils.splitChangeOutput(txBuilder, original, changeAddress);
+      const bundleAssets = split.map(item =>
+        utils.multiAssetToArray(item.output.amount().multi_asset()),
+      );
+      const originalCost =
+        original.output.amount().coin() + original.outputFee.to_bigint();
+      const splitCost = split.reduce(
+        (sum, item) =>
+          sum + item.output.amount().coin() + item.outputFee.to_bigint(),
+        BigInt(0),
+      );
+
+      expect(bundleAssets.map(bundle => bundle.length)).toEqual(
+        expectedBundleSizes,
+      );
+      expect(bundleAssets.every(bundle => bundle.length <= 50)).toBe(true);
+      expect(bundleAssets.flat()).toEqual(assets);
+      expect(splitCost).toBe(originalCost);
+    },
+  );
+
   fixtures.filterUtxos.forEach(f => {
     test(f.description, () => {
       expect(utils.filterUtxos(f.utxos, f.asset)).toMatchObject(f.result);

@@ -68,6 +68,47 @@ describe('CML cardano adapter', () => {
     expect(multiAssetToArray(buildMultiAsset(assets))).toEqual(assets);
   });
 
+  test('serializes transaction-body multi-assets in canonical CBOR key order', () => {
+    const lowerPolicy = '11'.repeat(28);
+    const higherPolicy = 'ee'.repeat(28);
+    const output = buildTxOutput(
+      {
+        address: shelleyAddress,
+        amount: '5000000',
+        assets: [
+          { unit: `${higherPolicy}01`, quantity: '1' },
+          { unit: `${lowerPolicy}0001`, quantity: '2' },
+          { unit: `${lowerPolicy}ff`, quantity: '3' },
+        ],
+      },
+      shelleyAddress,
+    );
+    const inputs = Cardano.TransactionInputList.new();
+    inputs.add(
+      Cardano.TransactionInput.new(
+        Cardano.TransactionHash.from_raw_bytes(Buffer.alloc(32)),
+        BigInt(0),
+      ),
+    );
+    const outputs = Cardano.TransactionOutputList.new();
+    outputs.add(output);
+
+    const body = Cardano.TransactionBody.new(inputs, outputs, BigInt(0));
+    const bodyHex = body.to_cbor_hex();
+    const lowerPolicyIndex = bodyHex.indexOf(`581c${lowerPolicy}`);
+    const higherPolicyIndex = bodyHex.indexOf(`581c${higherPolicy}`);
+    const shorterAssetNameIndex = bodyHex.indexOf('41ff');
+    const longerAssetNameIndex = bodyHex.indexOf('420001');
+
+    expect(lowerPolicyIndex).toBeGreaterThanOrEqual(0);
+    expect(higherPolicyIndex).toBeGreaterThanOrEqual(0);
+    expect(shorterAssetNameIndex).toBeGreaterThanOrEqual(0);
+    expect(longerAssetNameIndex).toBeGreaterThanOrEqual(0);
+    expect(bodyHex).toBe(body.to_canonical_cbor_hex());
+    expect(lowerPolicyIndex).toBeLessThan(higherPolicyIndex);
+    expect(shorterAssetNameIndex).toBeLessThan(longerAssetNameIndex);
+  });
+
   test('builds a CML output with its exact minimum ADA requirement', () => {
     const output = buildTxOutput(
       {

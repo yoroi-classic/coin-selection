@@ -102,7 +102,7 @@ export const drepIdToHex = (
   hex: string;
 } => {
   const decoded = bech32.decode(drepId, 128);
-  const bytes = Buffer.from(bech32.fromWords(decoded.words));
+  const bytes = bech32.fromWords(decoded.words);
   const kind =
     decoded.prefix === 'drep'
       ? CardanoDRepType.KEY_HASH
@@ -116,6 +116,6 @@ export const drepIdToHex = (
 
   return {
     type: kind,
-    hex: bytes.toString('hex'),
+    hex: Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join(''),
   };
 };
