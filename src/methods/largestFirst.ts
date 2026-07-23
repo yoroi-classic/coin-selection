@@ -29,6 +29,8 @@ import {
   splitChangeOutput,
   calculateUserOutputsFee,
   orderInputs,
+  bigNumFromBigInt,
+  outputBuilderResult,
 } from '../utils/common';
 import { CoinSelectionError } from '../utils/errors';
 
@@ -47,12 +49,12 @@ export const largestFirst = (
   } = params;
   const txBuilder = getTxBuilder(options?.feeParams?.a);
   if (ttl) {
-    txBuilder.set_ttl(ttl);
+    txBuilder.set_ttl(BigInt(ttl));
   }
 
   const usedUtxos: Utxo[] = [];
   let sortedUtxos = sortUtxos(utxos);
-  const accountKey = CardanoWasm.Bip32PublicKey.from_bytes(
+  const accountKey = CardanoWasm.Bip32PublicKey.from_raw_bytes(
     Buffer.from(accountPubKey, 'hex'),
   );
 
@@ -60,12 +62,10 @@ export const largestFirst = (
   const preparedCertificates = prepareCertificates(certificates, accountKey);
   const preparedWithdrawals = prepareWithdrawals(withdrawals);
 
-  if (preparedCertificates.len() > 0) {
-    txBuilder.set_certs(preparedCertificates);
-  }
-  if (preparedWithdrawals.len() > 0) {
-    txBuilder.set_withdrawals(preparedWithdrawals);
-  }
+  preparedCertificates.forEach(certificate => txBuilder.add_cert(certificate));
+  preparedWithdrawals.forEach(withdrawal =>
+    txBuilder.add_withdrawal(withdrawal),
+  );
 
   // TODO: negative value in case of deregistration (-2000000), but we still need enough utxos to cover fee which can't be (is that right?) paid from returned deposit
   const deposit = calculateRequiredDeposit(certificates);
@@ -75,7 +75,7 @@ export const largestFirst = (
   );
 
   // calc initial fee
-  let totalFeesAmount = txBuilder.min_fee();
+  let totalFeesAmount = bigNumFromBigInt(txBuilder.min_fee(false));
   let utxosTotalAmount = totalWithdrawal;
   if (deposit < 0) {
     // stake deregistration, 2 ADA returned
@@ -91,9 +91,9 @@ export const largestFirst = (
   );
 
   const addUtxoToSelection = (utxo: Utxo) => {
-    const { input, address, amount } = buildTxInput(utxo);
-    const fee = txBuilder.fee_for_input(address, input, amount);
-    txBuilder.add_regular_input(address, input, amount);
+    const { builderResult } = buildTxInput(utxo);
+    const fee = bigNumFromBigInt(txBuilder.fee_for_input(builderResult));
+    txBuilder.add_input(builderResult);
     usedUtxos.push(utxo);
     totalFeesAmount = totalFeesAmount.checked_add(fee);
     utxosTotalAmount = utxosTotalAmount.checked_add(
@@ -160,11 +160,9 @@ export const largestFirst = (
       );
 
       // recalculate fees for outputs as cost for max output may be larger than before
-      totalFeesAmount = txBuilder
-        .min_fee()
-        .checked_add(
-          calculateUserOutputsFee(txBuilder, preparedOutputs, changeAddress),
-        );
+      totalFeesAmount = bigNumFromBigInt(txBuilder.min_fee(false)).checked_add(
+        calculateUserOutputsFee(txBuilder, preparedOutputs, changeAddress),
+      );
 
       // recalculate change after setting amount to max output
       singleChangeOutput = prepareChangeOutput(
@@ -191,7 +189,7 @@ export const largestFirst = (
     changeOutputs.forEach(changeOutput => {
       // we need to cover amounts and fees for change outputs
       requiredAmount = requiredAmount
-        .checked_add(changeOutput.output.amount().coin())
+        .checked_add(bigNumFromBigInt(changeOutput.output.amount().coin()))
         .checked_add(changeOutput.outputFee);
     });
 
@@ -213,9 +211,9 @@ export const largestFirst = (
         // set change output
         changeOutput = changeOutputs.map(change => ({
           isChange: true,
-          amount: change.output.amount().coin().to_str(),
+          amount: change.output.amount().coin().toString(),
           address: changeAddress,
-          assets: multiAssetToArray(change.output.amount().multiasset()),
+          assets: multiAssetToArray(change.output.amount().multi_asset()),
         }));
       } else {
         if (sortedUtxos.length > 0) {
@@ -254,26 +252,29 @@ export const largestFirst = (
 
   preparedOutputs.forEach(output => {
     const txOutput = buildTxOutput(output, changeAddress);
-    txBuilder.add_output(txOutput);
+    txBuilder.add_output(outputBuilderResult(txOutput));
   });
 
   const finalOutputs: Output[] = JSON.parse(JSON.stringify(preparedOutputs));
   if (changeOutput) {
     changeOutput.forEach(change => {
       finalOutputs.push(change);
-      txBuilder.add_output(buildTxOutput(change, changeAddress));
+      txBuilder.add_output(
+        outputBuilderResult(buildTxOutput(change, changeAddress)),
+      );
     });
   }
 
-  txBuilder.set_fee(totalFeesAmount);
-  const txBody = txBuilder.build();
+  txBuilder.set_fee(totalFeesAmount.to_bigint());
+  const txBody = txBuilder
+    .build(
+      CardanoWasm.ChangeSelectionAlgo.Default,
+      CardanoWasm.Address.from_bech32(changeAddress),
+    )
+    .body();
 
-  const txHash = CardanoWasm.FixedTransaction.new_from_body_bytes(
-    txBody.to_bytes(),
-  )
-    .transaction_hash()
-    .to_hex();
-  const txBodyHex = Buffer.from(txBody.to_bytes()).toString('hex');
+  const txHash = CardanoWasm.hash_transaction(txBody).to_hex();
+  const txBodyHex = Buffer.from(txBody.to_cbor_bytes()).toString('hex');
 
   const totalSpent = totalUserOutputsAmount.checked_add(totalFeesAmount);
 

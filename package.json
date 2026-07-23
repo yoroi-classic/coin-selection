@@ -10,7 +10,7 @@
   "main": "lib/cjs/index.js",
   "module": "lib/esm/index.js",
   "browser": {
-    "@emurgo/cardano-serialization-lib-nodejs": "@emurgo/cardano-serialization-lib-browser"
+    "@dcspark/cardano-multiplatform-lib-nodejs": "@dcspark/cardano-multiplatform-lib-browser"
   },
   "files": [
     "lib/**/*.js",
@@ -48,8 +48,9 @@
     "typescript-eslint": "^8.8.0"
   },
   "dependencies": {
-    "@emurgo/cardano-serialization-lib-browser": "^13.2.0",
-    "@emurgo/cardano-serialization-lib-nodejs": "13.2.0"
+    "@dcspark/cardano-multiplatform-lib-browser": "6.2.0",
+    "@dcspark/cardano-multiplatform-lib-nodejs": "6.2.0",
+    "bech32": "2.0.0"
   },
   "packageManager": "yarn@4.5.0"
 }

@@ -1383,6 +1383,23 @@ export const coinSelection = [
 
 export const exceptions = [
   {
+    description: 'Unsupported stake pool registration certificate',
+    utxos: [utxo1],
+    outputs: [],
+    changeAddress: changeAddress,
+    certificates: [
+      {
+        type: 3 as const,
+        pool_parameters: {},
+      },
+    ],
+    withdrawals: [],
+    accountPubKey:
+      'ec8fdf616242f430855ad7477acda53395eb30c295f5a7ef038712578877375b5a2f00353c9c5cc88c7ff18e71dc08724d90fc238213b789c0b02438e336be07',
+    options: {},
+    result: 'UNSUPPORTED_CERTIFICATE_TYPE',
+  },
+  {
     description: 'Not enough utxos to cover an output amount',
     utxos: [utxo1],
     outputs: [

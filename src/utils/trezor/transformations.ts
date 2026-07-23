@@ -1,4 +1,4 @@
-import * as CardanoWasm from '../cardano';
+import { bech32 } from 'bech32';
 
 import {
   CardanoAddressParameters,
@@ -101,29 +101,21 @@ export const drepIdToHex = (
   type: CardanoDRepType.KEY_HASH | CardanoDRepType.SCRIPT_HASH;
   hex: string;
 } => {
-  const drep = CardanoWasm.DRep.from_bech32(drepId);
-  const kind = drep.kind() as unknown as
-    | CardanoDRepType.KEY_HASH
-    | CardanoDRepType.SCRIPT_HASH;
+  const decoded = bech32.decode(drepId, 128);
+  const bytes = bech32.fromWords(decoded.words);
+  const kind =
+    decoded.prefix === 'drep'
+      ? CardanoDRepType.KEY_HASH
+      : decoded.prefix === 'drep_script'
+        ? CardanoDRepType.SCRIPT_HASH
+        : undefined;
 
-  let drepHex: string | undefined;
-  switch (kind) {
-    case CardanoDRepType.KEY_HASH:
-      drepHex = drep.to_key_hash()?.to_hex();
-      break;
-    case CardanoDRepType.SCRIPT_HASH:
-      drepHex = drep.to_script_hash()?.to_hex();
-      break;
-  }
-
-  if (!drepHex) {
+  if (kind === undefined || bytes.length !== 28) {
     throw Error('Invalid drepId');
   }
 
-  const drepData = {
+  return {
     type: kind,
-    hex: drepHex,
+    hex: Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join(''),
   };
-  drep.free();
-  return drepData;
 };

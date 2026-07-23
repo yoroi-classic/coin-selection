@@ -1,7 +1,8 @@
 # coin-selection
 
 Minimal implementation of Cardano coin selection algorithms (see [CIP-2](https://cips.cardano.org/cips/cip2/)) developed solely for Trezor Suite.
-Under the hood it leverages Cardano Serialization Lib via WASM module.
+Under the hood it uses Cardano Multiplatform Lib (CML), selecting the Node.js
+or browser package through the package's `browser` mapping.
 
 ## Features
 
@@ -23,10 +24,8 @@ yarn run lint
 yarn run type-check
 ```
 
-This fork still depends on Cardano Serialization Lib. The CML migration is
-tracked in [issue #1](https://github.com/yoroi-classic/coin-selection/issues/1),
-with the current blockers documented in
-[docs/cml-migration-blocker.md](docs/cml-migration-blocker.md).
+The CML adapter and its compatibility decisions are documented in
+[docs/cml-migration.md](docs/cml-migration.md).
 
 ## Usage
 
