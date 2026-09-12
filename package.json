@@ -21,7 +21,6 @@
     "clean": "rimraf lib",
     "lint": "eslint ./src/**/*.ts",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run build",
     "type-check": "yarn tsc -p tsconfig.types.json",
     "test": "yarn run-s 'test:*'",
     "test:unit": "jest -c ./jest.config.js",
