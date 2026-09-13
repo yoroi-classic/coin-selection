@@ -20,6 +20,7 @@
     "build": "npm run clean && tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json",
     "clean": "rimraf lib",
     "lint": "eslint ./src/**/*.ts",
+    "prepack": "npm run build",
     "prepare": "npm run build",
     "type-check": "yarn tsc -p tsconfig.types.json",
     "test": "yarn run-s 'test:*'",
