@@ -439,10 +439,8 @@ export const splitChangeOutput = (
     singleChangeOutput.output.amount().coin() +
     singleChangeOutput.outputFee.to_bigint();
   const valueSize = (assets: Asset[]) =>
-    CardanoWasm.Value.new(
-      maxCoin,
-      buildMultiAsset(assets),
-    ).to_cbor_bytes().length;
+    CardanoWasm.Value.new(maxCoin, buildMultiAsset(assets)).to_cbor_bytes()
+      .length;
 
   if (
     allAssets.length <= maxTokensPerOutput &&
