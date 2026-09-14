@@ -108,7 +108,7 @@ describe('common utils', () => {
         bundleAssets.every(
           bundle =>
             CardanoWasm.Value.new(
-              BigInt(0),
+              BigInt(100000000),
               utils.buildMultiAsset(bundle),
             ).to_cbor_bytes().length <= 5000,
         ),
