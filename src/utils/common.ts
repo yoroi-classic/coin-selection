@@ -4,7 +4,6 @@ import {
   CertificateType,
   DATA_COST_PER_UTXO_BYTE,
   ERROR,
-  MAX_TOKENS_PER_OUTPUT,
 } from '../constants';
 import {
   Certificate,
@@ -432,12 +431,18 @@ export const splitChangeOutput = (
   txBuilder: CardanoWasm.TransactionBuilder,
   singleChangeOutput: OutputCost,
   changeAddress: string,
-  maxTokensPerOutput = MAX_TOKENS_PER_OUTPUT,
+  maxTokensPerOutput = Number.POSITIVE_INFINITY,
 ): OutputCost[] => {
-  // TODO: https://github.com/Emurgo/cardano-serialization-lib/pull/236
   const multiAsset = singleChangeOutput.output.amount().multi_asset();
   const allAssets = multiAssetToArray(multiAsset);
-  if (allAssets.length <= maxTokensPerOutput) {
+  const valueSize = (assets: Asset[]) =>
+    CardanoWasm.Value.new(BigInt(0), buildMultiAsset(assets)).to_cbor_bytes()
+      .length;
+
+  if (
+    allAssets.length <= maxTokensPerOutput &&
+    valueSize(allAssets) <= CARDANO_PARAMS.MAX_VALUE_SIZE
+  ) {
     return [singleChangeOutput];
   }
 
@@ -445,16 +450,25 @@ export const splitChangeOutput = (
     singleChangeOutput.output.amount().coin(),
   ).checked_add(singleChangeOutput.outputFee);
 
-  const nAssetBundles = Math.ceil(allAssets.length / maxTokensPerOutput);
+  const assetBundles: Asset[][] = [];
+  let assetsBundle: Asset[] = [];
+  for (const asset of allAssets) {
+    const candidate = [...assetsBundle, asset];
+    if (
+      assetsBundle.length > 0 &&
+      (candidate.length > maxTokensPerOutput ||
+        valueSize(candidate) > CARDANO_PARAMS.MAX_VALUE_SIZE)
+    ) {
+      assetBundles.push(assetsBundle);
+      assetsBundle = [asset];
+    } else {
+      assetsBundle = candidate;
+    }
+  }
+  if (assetsBundle.length > 0) assetBundles.push(assetsBundle);
 
   const changeOutputs: ChangeOutput[] = [];
-  // split change output to multiple outputs, where each bundle has maximum of maxTokensPerOutput assets
-  for (let i = 0; i < nAssetBundles; i++) {
-    const assetsBundle = allAssets.slice(
-      i * maxTokensPerOutput,
-      (i + 1) * maxTokensPerOutput,
-    );
-
+  for (const assetsBundle of assetBundles) {
     const outputValue = CardanoWasm.Value.new(
       BigInt(0),
       buildMultiAsset(assetsBundle),
