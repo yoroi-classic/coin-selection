@@ -4,7 +4,6 @@ import {
   CertificateType,
   DATA_COST_PER_UTXO_BYTE,
   ERROR,
-  MAX_TOKENS_PER_OUTPUT,
 } from '../constants';
 import {
   Certificate,
@@ -432,12 +431,21 @@ export const splitChangeOutput = (
   txBuilder: CardanoWasm.TransactionBuilder,
   singleChangeOutput: OutputCost,
   changeAddress: string,
-  maxTokensPerOutput = MAX_TOKENS_PER_OUTPUT,
+  maxTokensPerOutput = Number.POSITIVE_INFINITY,
 ): OutputCost[] => {
-  // TODO: https://github.com/Emurgo/cardano-serialization-lib/pull/236
   const multiAsset = singleChangeOutput.output.amount().multi_asset();
   const allAssets = multiAssetToArray(multiAsset);
-  if (allAssets.length <= maxTokensPerOutput) {
+  const maxCoin =
+    singleChangeOutput.output.amount().coin() +
+    singleChangeOutput.outputFee.to_bigint();
+  const valueSize = (assets: Asset[]) =>
+    CardanoWasm.Value.new(maxCoin, buildMultiAsset(assets)).to_cbor_bytes()
+      .length;
+
+  if (
+    allAssets.length <= maxTokensPerOutput &&
+    valueSize(allAssets) <= CARDANO_PARAMS.MAX_VALUE_SIZE
+  ) {
     return [singleChangeOutput];
   }
 
@@ -445,16 +453,30 @@ export const splitChangeOutput = (
     singleChangeOutput.output.amount().coin(),
   ).checked_add(singleChangeOutput.outputFee);
 
-  const nAssetBundles = Math.ceil(allAssets.length / maxTokensPerOutput);
+  const assetBundles: Asset[][] = [];
+  let bundleStart = 0;
+  while (bundleStart < allAssets.length) {
+    let low = bundleStart + 1;
+    let high = Math.min(allAssets.length, bundleStart + maxTokensPerOutput);
+    let bundleEnd = bundleStart + 1;
+
+    while (low <= high) {
+      const candidateEnd = Math.floor((low + high) / 2);
+      const candidate = allAssets.slice(bundleStart, candidateEnd);
+      if (valueSize(candidate) <= CARDANO_PARAMS.MAX_VALUE_SIZE) {
+        bundleEnd = candidateEnd;
+        low = candidateEnd + 1;
+      } else {
+        high = candidateEnd - 1;
+      }
+    }
+
+    assetBundles.push(allAssets.slice(bundleStart, bundleEnd));
+    bundleStart = bundleEnd;
+  }
 
   const changeOutputs: ChangeOutput[] = [];
-  // split change output to multiple outputs, where each bundle has maximum of maxTokensPerOutput assets
-  for (let i = 0; i < nAssetBundles; i++) {
-    const assetsBundle = allAssets.slice(
-      i * maxTokensPerOutput,
-      (i + 1) * maxTokensPerOutput,
-    );
-
+  for (const assetsBundle of assetBundles) {
     const outputValue = CardanoWasm.Value.new(
       BigInt(0),
       buildMultiAsset(assetsBundle),
