@@ -254,8 +254,18 @@ export const getOutputCost = (
   dummyAddress: string,
 ): OutputCost => {
   const txOutput = buildTxOutput(output, dummyAddress);
+  // fee_for_output rejects values larger than max_value_size. Change outputs
+  // are split immediately afterwards, so use a coin-only output to estimate
+  // the placeholder fee and let splitChangeOutput calculate each real fee.
+  const feeOutput =
+    txOutput.amount().to_cbor_bytes().length > CARDANO_PARAMS.MAX_VALUE_SIZE
+      ? CardanoWasm.TransactionOutput.new(
+          txOutput.address(),
+          CardanoWasm.Value.from_coin(txOutput.amount().coin()),
+        )
+      : txOutput;
   const outputFee = bigNumFromBigInt(
-    txBuilder.fee_for_output(outputBuilderResult(txOutput)),
+    txBuilder.fee_for_output(outputBuilderResult(feeOutput)),
   );
   const minAda = bigNumFromBigInt(
     CardanoWasm.min_ada_required(txOutput, DATA_COST_PER_UTXO_BYTE),
@@ -457,7 +467,12 @@ export const splitChangeOutput = (
   let bundleStart = 0;
   while (bundleStart < allAssets.length) {
     let low = bundleStart + 1;
-    let high = Math.min(allAssets.length, bundleStart + maxTokensPerOutput);
+    let high = Math.min(
+      allAssets.length,
+      Number.isFinite(maxTokensPerOutput)
+        ? bundleStart + maxTokensPerOutput
+        : allAssets.length,
+    );
     let bundleEnd = bundleStart + 1;
 
     while (low <= high) {
