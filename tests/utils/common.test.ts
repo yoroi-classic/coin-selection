@@ -73,49 +73,67 @@ describe('common utils', () => {
   });
 
   test.each([
-    { assetCount: 50, expectedBundleSizes: [50] },
-    { assetCount: 51, expectedBundleSizes: [50, 1] },
+    { assetCount: 51, expectedBundleSizes: [51] },
+    { assetCount: 142, expectedBundleSizes: [141, 1] },
   ])(
-    'splitChangeOutput keeps at most 50 assets for $assetCount assets',
+    'splitChangeOutput respects the serialized value limit for $assetCount assets',
     ({ assetCount, expectedBundleSizes }) => {
       const policyId =
         '02477d7c23b4c2834b0be8ca8578dde47af0cc82a964688f6fc95a7a';
       const assets = Array.from({ length: assetCount }, (_, index) => ({
         quantity: '1',
-        unit: `${policyId}${index.toString(16).padStart(2, '0')}`,
+        unit: `${policyId}${index.toString(16).padStart(64, '0')}`,
       }));
       const txBuilder = utils.getTxBuilder();
-      const original = utils.getOutputCost(
-        txBuilder,
-        {
-          address: changeAddress,
-          amount: '100000000',
-          assets,
-          setMax: false,
-        },
-        changeAddress,
-      );
+      const original = {
+        output: CardanoWasm.TransactionOutput.new(
+          CardanoWasm.Address.from_bech32(changeAddress),
+          CardanoWasm.Value.new(
+            BigInt(100000000),
+            utils.buildMultiAsset(assets),
+          ),
+        ),
+        outputFee: CardanoWasm.BigNum.from_bigint(BigInt(0)),
+        minOutputAmount: CardanoWasm.BigNum.from_bigint(BigInt(0)),
+      };
 
       const split = utils.splitChangeOutput(txBuilder, original, changeAddress);
       const bundleAssets = split.map(item =>
         utils.multiAssetToArray(item.output.amount().multi_asset()),
       );
-      const originalCost =
-        original.output.amount().coin() + original.outputFee.to_bigint();
-      const splitCost = split.reduce(
-        (sum, item) =>
-          sum + item.output.amount().coin() + item.outputFee.to_bigint(),
-        BigInt(0),
-      );
-
       expect(bundleAssets.map(bundle => bundle.length)).toEqual(
         expectedBundleSizes,
       );
-      expect(bundleAssets.every(bundle => bundle.length <= 50)).toBe(true);
+      expect(
+        bundleAssets.every(
+          bundle =>
+            CardanoWasm.Value.new(
+              BigInt(100000000),
+              utils.buildMultiAsset(bundle),
+            ).to_cbor_bytes().length <= 5000,
+        ),
+      ).toBe(true);
       expect(bundleAssets.flat()).toEqual(assets);
-      expect(splitCost).toBe(originalCost);
     },
   );
+
+  test('rejects oversized user output values', () => {
+    const policyId =
+      '02477d7c23b4c2834b0be8ca8578dde47af0cc82a964688f6fc95a7a';
+    const assets = Array.from({ length: 142 }, (_, index) => ({
+      quantity: '1',
+      unit: `${policyId}${index.toString(16).padStart(64, '0')}`,
+    }));
+    const txBuilder = utils.getTxBuilder();
+
+    expect(() =>
+      utils.getOutputCost(
+        txBuilder,
+        { address: changeAddress, amount: '1000000', assets },
+        changeAddress,
+      ),
+    ).toThrow('Max value size');
+  });
 
   fixtures.filterUtxos.forEach(f => {
     test(f.description, () => {
