@@ -252,12 +252,14 @@ export const getOutputCost = (
   txBuilder: CardanoWasm.TransactionBuilder,
   output: Output,
   dummyAddress: string,
+  allowOversizedValue = false,
 ): OutputCost => {
   const txOutput = buildTxOutput(output, dummyAddress);
   // fee_for_output rejects values larger than max_value_size. Change outputs
   // are split immediately afterwards, so use a coin-only output to estimate
   // the placeholder fee and let splitChangeOutput calculate each real fee.
   const feeOutput =
+    allowOversizedValue &&
     txOutput.amount().to_cbor_bytes().length > CARDANO_PARAMS.MAX_VALUE_SIZE
       ? CardanoWasm.TransactionOutput.new(
           txOutput.address(),
@@ -589,6 +591,7 @@ export const prepareChangeOutput = (
       assets: changeOutputAssets,
     },
     changeAddress,
+    true,
   );
 
   // calculate change output amount as utxosTotalAmount - totalOutputAmount - totalFeesAmount - change output fee

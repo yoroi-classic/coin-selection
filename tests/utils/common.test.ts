@@ -117,6 +117,24 @@ describe('common utils', () => {
     },
   );
 
+  test('rejects oversized user output values', () => {
+    const policyId =
+      '02477d7c23b4c2834b0be8ca8578dde47af0cc82a964688f6fc95a7a';
+    const assets = Array.from({ length: 142 }, (_, index) => ({
+      quantity: '1',
+      unit: `${policyId}${index.toString(16).padStart(64, '0')}`,
+    }));
+    const txBuilder = utils.getTxBuilder();
+
+    expect(() =>
+      utils.getOutputCost(
+        txBuilder,
+        { address: changeAddress, amount: '1000000', assets },
+        changeAddress,
+      ),
+    ).toThrow('Max value size');
+  });
+
   fixtures.filterUtxos.forEach(f => {
     test(f.description, () => {
       expect(utils.filterUtxos(f.utxos, f.asset)).toMatchObject(f.result);
