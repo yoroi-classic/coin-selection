@@ -1,5 +1,6 @@
 import * as CardanoWasm from '../../src/utils/cardano';
 import * as utils from '../../src/utils/common';
+import { DATA_COST_PER_UTXO_BYTE } from '../../src/constants';
 import { coinSelection } from '../../src';
 import * as fixtures from './fixtures/common';
 import { changeAddress } from '../fixtures/constants';
@@ -147,6 +148,15 @@ describe('common utils', () => {
         ],
       }));
 
+      inputUtxos.forEach(utxo => {
+        const value = CardanoWasm.Value.new(
+          BigInt(utxo.amount[0].quantity),
+          utils.buildMultiAsset(utxo.amount.slice(1)),
+        );
+        expect(value.to_cbor_bytes().length).toBeGreaterThan(3500);
+        expect(value.to_cbor_bytes().length).toBeLessThan(3600);
+      });
+
       const result = coinSelection(
         {
           utxos: inputUtxos,
@@ -173,6 +183,24 @@ describe('common utils', () => {
               utils.buildMultiAsset(output.assets),
             ).to_cbor_bytes().length <= 5000,
         ),
+      ).toBe(true);
+      const outputAddress = CardanoWasm.Address.from_bech32(changeAddress);
+      expect(
+        changeOutputs.every(output => {
+          const value = CardanoWasm.Value.new(
+            BigInt(output.amount),
+            utils.buildMultiAsset(output.assets),
+          );
+          const txOutput = CardanoWasm.TransactionOutput.new(
+            outputAddress,
+            value,
+          );
+          const minimumAda = CardanoWasm.min_ada_required(
+            txOutput,
+            DATA_COST_PER_UTXO_BYTE,
+          );
+          return BigInt(output.amount) >= minimumAda;
+        }),
       ).toBe(true);
 
       const inputAssets = inputUtxos.flatMap(utxo =>
