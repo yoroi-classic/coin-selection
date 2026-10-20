@@ -10,7 +10,7 @@ const policyId = 'ab'.repeat(28);
 const createAssets = (
   count: number,
   lastNameLength?: number,
-  shortNameCount = 0,
+  shortNameIndexes: number[] = [],
 ): types.Asset[] =>
   Array.from({ length: count }, (_, index) => ({
     unit:
@@ -18,7 +18,7 @@ const createAssets = (
       index
         .toString(16)
         .padStart(
-          (index < shortNameCount
+          (shortNameIndexes.includes(index)
             ? 31
             : index === count - 1 && lastNameLength !== undefined
               ? lastNameLength
@@ -115,7 +115,7 @@ describe.each([
     });
 
     test('splits combined change assets so every value is within the protocol limit', () => {
-      const assets = createAssets(200, undefined, 6);
+      const assets = createAssets(200, undefined, [0, 1, 2, 100, 101, 102]);
       const result = select(
         createUtxos('40000000', assets),
         '30000000',
