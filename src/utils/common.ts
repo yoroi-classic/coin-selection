@@ -546,7 +546,9 @@ export const splitChangeOutput = (
       // boundary. That extra fee must come out of this output's coin, not be
       // left as an unfunded requirement for the selection algorithm.
       const feeAtMinimumCoin = changeOutputCost.outputFee;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
+      const observedFees = new Map<string, CardanoWasm.BigNum>();
+      while (true) {
+        partialChange.amount = changeOutputAmount.to_str();
         changeOutputCost = getOutputCost(
           txBuilder,
           partialChange,
@@ -559,10 +561,50 @@ export const splitChangeOutput = (
           availableForLastOutput.to_bigint() - feeDelta,
         );
         if (adjustedAmount.compare(changeOutputAmount) === 0) break;
+
+        const amountKey = adjustedAmount.to_str();
+        if (observedFees.has(amountKey)) {
+          // A coin-width boundary can make the required fee oscillate: the
+          // larger coin costs more, which pushes the coin below the boundary,
+          // which lowers the fee and pushes it back above. Keep the lower
+          // coin and reserve the highest observed fee so the selection stays
+          // funded instead of undercharging one side of the cycle.
+          const highestObservedFee = [
+            ...observedFees.values(),
+            changeOutputCost.outputFee,
+          ].reduce((highest, fee) =>
+            fee.compare(highest) > 0 ? fee : highest,
+          );
+          changeOutputAmount = bigNumFromStr(
+            [
+              ...observedFees.keys(),
+              changeOutputAmount.to_str(),
+              amountKey,
+            ].reduce((lowest, amount) =>
+              bigNumFromStr(amount).compare(bigNumFromStr(lowest)) < 0
+                ? amount
+                : lowest,
+            ),
+          );
+          partialChange.amount = changeOutputAmount.to_str();
+          changeOutputCost = getOutputCost(
+            txBuilder,
+            partialChange,
+            changeAddress,
+          );
+          changeOutputCost = {
+            ...changeOutputCost,
+            outputFee: highestObservedFee,
+          };
+          break;
+        }
+
+        observedFees.set(
+          changeOutputAmount.to_str(),
+          changeOutputCost.outputFee,
+        );
         changeOutputAmount = adjustedAmount;
-        partialChange.amount = changeOutputAmount.to_str();
       }
-      changeOutputCost = getOutputCost(txBuilder, partialChange, changeAddress);
     }
     return changeOutputCost;
   });

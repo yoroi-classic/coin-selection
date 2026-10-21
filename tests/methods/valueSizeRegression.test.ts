@@ -98,6 +98,22 @@ const assertFeeIsMinimumForSerializedTransaction = (
   expect(BigInt(result.fee)).toBe(txBuilder.min_fee(false));
 };
 
+const assertFeeCoversSerializedMinimum = (
+  result: Exclude<ReturnType<typeof select>, { type: 'nonfinal' }>,
+) => {
+  const txBuilder = getTxBuilder(DEFAULT_FEE_PARAMS.a);
+  result.inputs.forEach(input =>
+    txBuilder.add_input(buildTxInput(input).builderResult),
+  );
+  result.outputs.forEach(output =>
+    txBuilder.add_output(
+      outputBuilderResult(buildTxOutput(output, changeAddress)),
+    ),
+  );
+  txBuilder.set_fee(BigInt(result.fee));
+  expect(BigInt(result.fee)).toBeGreaterThanOrEqual(txBuilder.min_fee(false));
+};
+
 test('rejects a result with an overpaid transaction fee', () => {
   const assets = createAssets(142, 20);
   const result = select(createUtxos('40000000', assets), '40500000', false);
@@ -201,6 +217,23 @@ describe.each([
       expect(change).toHaveLength(2);
       expect(BigInt(change[1].amount)).toBeGreaterThan(2n ** 32n);
       assertFeeIsMinimumForSerializedTransaction(result);
+    });
+
+    test('handles fee-width oscillation immediately above 2^32 lovelace', () => {
+      const assets = createAssets(142, 20);
+      const result = select(
+        createUtxos('5000000000', assets),
+        '5682291085',
+        forceLargestFirst,
+      );
+
+      expect(result.type).toBe('final');
+      if (result.type !== 'final') return;
+      sanityCheck(result);
+      const change = result.outputs.filter(output => output.isChange);
+      expect(change).toHaveLength(2);
+      expect(BigInt(change[1].amount)).toBe(2n ** 32n - 76n);
+      assertFeeCoversSerializedMinimum(result);
     });
 
     test('splits a 5,001-byte combined change value at the protocol limit', () => {
