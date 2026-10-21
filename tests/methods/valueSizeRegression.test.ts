@@ -1,5 +1,11 @@
-import { coinSelection, types } from '../../src';
+import { coinSelection, DEFAULT_FEE_PARAMS, types } from '../../src';
 import { TransactionBody } from '../../src/utils/cardano';
+import {
+  buildTxInput,
+  buildTxOutput,
+  getTxBuilder,
+  outputBuilderResult,
+} from '../../src/utils/common';
 import { changeAddress, utxo1 } from '../fixtures/constants';
 import { sanityCheck } from '../setup';
 
@@ -76,13 +82,38 @@ const select = (
     { forceLargestFirstSelection: forceLargestFirst },
   );
 
-const assertFeeCoversSerializedTransaction = (
+const assertFeeIsMinimumForSerializedTransaction = (
   result: Exclude<ReturnType<typeof select>, { type: 'nonfinal' }>,
 ) => {
-  expect(BigInt(result.fee)).toBeGreaterThanOrEqual(
-    44n * BigInt(result.tx.size) + 155381n,
+  const txBuilder = getTxBuilder(DEFAULT_FEE_PARAMS.a);
+  result.inputs.forEach(input =>
+    txBuilder.add_input(buildTxInput(input).builderResult),
   );
+  result.outputs.forEach(output =>
+    txBuilder.add_output(
+      outputBuilderResult(buildTxOutput(output, changeAddress)),
+    ),
+  );
+  txBuilder.set_fee(BigInt(result.fee));
+  expect(BigInt(result.fee)).toBe(txBuilder.min_fee(false));
 };
+
+test('rejects a result with an overpaid transaction fee', () => {
+  const assets = createAssets(142, 20);
+  const result = select(createUtxos('40000000', assets), '40500000', false);
+
+  expect(result.type).toBe('final');
+  if (result.type !== 'final') return;
+  assertFeeIsMinimumForSerializedTransaction(result);
+
+  const overpaidResult = {
+    ...result,
+    fee: (BigInt(result.fee) + BigInt(DEFAULT_FEE_PARAMS.a)).toString(),
+  };
+  expect(() =>
+    assertFeeIsMinimumForSerializedTransaction(overpaidResult),
+  ).toThrow();
+});
 
 describe.each([
   ['random-improve', false],
@@ -111,7 +142,7 @@ describe.each([
         changeIndex < 0 ? undefined : body.outputs().get(changeIndex);
       expect(changeOutput).toBeDefined();
       expect(changeOutput!.amount().to_cbor_bytes().length).toBe(5000);
-      assertFeeCoversSerializedTransaction(result);
+      assertFeeIsMinimumForSerializedTransaction(result);
     });
 
     test('splits combined change assets so every value is within the protocol limit', () => {
@@ -136,7 +167,7 @@ describe.each([
         const value = body.outputs().get(outputIndex);
         expect(value.amount().to_cbor_bytes().length).toBeLessThanOrEqual(5000);
       }
-      assertFeeCoversSerializedTransaction(result);
+      assertFeeIsMinimumForSerializedTransaction(result);
     });
 
     test('splits change just below 2^32 lovelace and charges each output fee', () => {
@@ -152,7 +183,7 @@ describe.each([
       sanityCheck(result);
       const change = result.outputs.filter(output => output.isChange);
       expect(change).toHaveLength(2);
-      assertFeeCoversSerializedTransaction(result);
+      assertFeeIsMinimumForSerializedTransaction(result);
     });
   },
 );

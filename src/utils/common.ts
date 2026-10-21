@@ -3,6 +3,7 @@ import {
   CARDANO_PARAMS,
   CertificateType,
   DATA_COST_PER_UTXO_BYTE,
+  DEFAULT_FEE_PARAMS,
   ERROR,
 } from '../constants';
 import {
@@ -659,10 +660,18 @@ export const prepareChangeOutput = (
   return null;
 };
 
-export const getTxBuilder = (a = '44'): CardanoWasm.TransactionBuilder =>
+export const getTxBuilder = (
+  a: string = DEFAULT_FEE_PARAMS.a,
+): CardanoWasm.TransactionBuilder =>
   CardanoWasm.TransactionBuilder.new(
     CardanoWasm.TransactionBuilderConfigBuilder.new()
-      .fee_algo(CardanoWasm.LinearFee.new(BigInt(a), BigInt(155381), BigInt(0)))
+      .fee_algo(
+        CardanoWasm.LinearFee.new(
+          BigInt(a),
+          BigInt(DEFAULT_FEE_PARAMS.b),
+          BigInt(0),
+        ),
+      )
       .pool_deposit(BigInt(500000000))
       .key_deposit(BigInt(2000000))
       .coins_per_utxo_byte(BigInt(CARDANO_PARAMS.COINS_PER_UTXO_BYTE))

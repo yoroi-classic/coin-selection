@@ -29,6 +29,11 @@ export const ERROR = {
   },
 } as const;
 
+export const DEFAULT_FEE_PARAMS = {
+  a: '44',
+  b: '155381',
+} as const;
+
 export const CARDANO_PARAMS = {
   PROTOCOL_MAGICS: {
     mainnet: CardanoWasm.NetworkInfo.mainnet().protocol_magic(),
