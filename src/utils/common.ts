@@ -3,8 +3,8 @@ import {
   CARDANO_PARAMS,
   CertificateType,
   DATA_COST_PER_UTXO_BYTE,
+  DEFAULT_FEE_PARAMS,
   ERROR,
-  MAX_TOKENS_PER_OUTPUT,
 } from '../constants';
 import {
   Certificate,
@@ -253,10 +253,22 @@ export const getOutputCost = (
   txBuilder: CardanoWasm.TransactionBuilder,
   output: Output,
   dummyAddress: string,
+  allowOversizedValue = false,
 ): OutputCost => {
   const txOutput = buildTxOutput(output, dummyAddress);
+  // fee_for_output rejects values larger than max_value_size. Change outputs
+  // are split immediately afterwards, so use a coin-only output to estimate
+  // the placeholder fee and let splitChangeOutput calculate each real fee.
+  const feeOutput =
+    allowOversizedValue &&
+    txOutput.amount().to_cbor_bytes().length > CARDANO_PARAMS.MAX_VALUE_SIZE
+      ? CardanoWasm.TransactionOutput.new(
+          txOutput.address(),
+          CardanoWasm.Value.from_coin(txOutput.amount().coin()),
+        )
+      : txOutput;
   const outputFee = bigNumFromBigInt(
-    txBuilder.fee_for_output(outputBuilderResult(txOutput)),
+    txBuilder.fee_for_output(outputBuilderResult(feeOutput)),
   );
   const minAda = bigNumFromBigInt(
     CardanoWasm.min_ada_required(txOutput, DATA_COST_PER_UTXO_BYTE),
@@ -432,12 +444,21 @@ export const splitChangeOutput = (
   txBuilder: CardanoWasm.TransactionBuilder,
   singleChangeOutput: OutputCost,
   changeAddress: string,
-  maxTokensPerOutput = MAX_TOKENS_PER_OUTPUT,
+  maxTokensPerOutput = Number.POSITIVE_INFINITY,
 ): OutputCost[] => {
-  // TODO: https://github.com/Emurgo/cardano-serialization-lib/pull/236
   const multiAsset = singleChangeOutput.output.amount().multi_asset();
   const allAssets = multiAssetToArray(multiAsset);
-  if (allAssets.length <= maxTokensPerOutput) {
+  const maxCoin =
+    singleChangeOutput.output.amount().coin() +
+    singleChangeOutput.outputFee.to_bigint();
+  const valueSize = (assets: Asset[]) =>
+    CardanoWasm.Value.new(maxCoin, buildMultiAsset(assets)).to_cbor_bytes()
+      .length;
+
+  if (
+    allAssets.length <= maxTokensPerOutput &&
+    valueSize(allAssets) <= CARDANO_PARAMS.MAX_VALUE_SIZE
+  ) {
     return [singleChangeOutput];
   }
 
@@ -445,16 +466,35 @@ export const splitChangeOutput = (
     singleChangeOutput.output.amount().coin(),
   ).checked_add(singleChangeOutput.outputFee);
 
-  const nAssetBundles = Math.ceil(allAssets.length / maxTokensPerOutput);
+  const assetBundles: Asset[][] = [];
+  let bundleStart = 0;
+  while (bundleStart < allAssets.length) {
+    let low = bundleStart + 1;
+    let high = Math.min(
+      allAssets.length,
+      Number.isFinite(maxTokensPerOutput)
+        ? bundleStart + maxTokensPerOutput
+        : allAssets.length,
+    );
+    let bundleEnd = bundleStart + 1;
+
+    while (low <= high) {
+      const candidateEnd = Math.floor((low + high) / 2);
+      const candidate = allAssets.slice(bundleStart, candidateEnd);
+      if (valueSize(candidate) <= CARDANO_PARAMS.MAX_VALUE_SIZE) {
+        bundleEnd = candidateEnd;
+        low = candidateEnd + 1;
+      } else {
+        high = candidateEnd - 1;
+      }
+    }
+
+    assetBundles.push(allAssets.slice(bundleStart, bundleEnd));
+    bundleStart = bundleEnd;
+  }
 
   const changeOutputs: ChangeOutput[] = [];
-  // split change output to multiple outputs, where each bundle has maximum of maxTokensPerOutput assets
-  for (let i = 0; i < nAssetBundles; i++) {
-    const assetsBundle = allAssets.slice(
-      i * maxTokensPerOutput,
-      (i + 1) * maxTokensPerOutput,
-    );
-
+  for (const assetsBundle of assetBundles) {
     const outputValue = CardanoWasm.Value.new(
       BigInt(0),
       buildMultiAsset(assetsBundle),
@@ -490,9 +530,10 @@ export const splitChangeOutput = (
 
     if (i === changeOutputs.length - 1) {
       // add all unused ADA to the last change output
-      let changeOutputAmount = lovelaceAvailable.checked_add(
+      const availableForLastOutput = lovelaceAvailable.checked_add(
         bigNumFromStr(partialChange.amount),
       );
+      let changeOutputAmount = availableForLastOutput;
 
       if (changeOutputAmount.compare(changeOutputCost.minOutputAmount) < 0) {
         // computed change amount would be below minUtxoValue
@@ -500,7 +541,70 @@ export const splitChangeOutput = (
         changeOutputAmount = changeOutputCost.minOutputAmount;
       }
       partialChange.amount = changeOutputAmount.to_str();
-      changeOutputCost = getOutputCost(txBuilder, partialChange, changeAddress);
+
+      // The fee can grow when the final coin crosses a CBOR integer-width
+      // boundary. That extra fee must come out of this output's coin, not be
+      // left as an unfunded requirement for the selection algorithm.
+      const feeAtMinimumCoin = changeOutputCost.outputFee;
+      const observedFees = new Map<string, CardanoWasm.BigNum>();
+      while (true) {
+        partialChange.amount = changeOutputAmount.to_str();
+        changeOutputCost = getOutputCost(
+          txBuilder,
+          partialChange,
+          changeAddress,
+        );
+        const feeDelta =
+          changeOutputCost.outputFee.to_bigint() -
+          feeAtMinimumCoin.to_bigint();
+        const adjustedAmount = bigNumFromBigInt(
+          availableForLastOutput.to_bigint() - feeDelta,
+        );
+        if (adjustedAmount.compare(changeOutputAmount) === 0) break;
+
+        const amountKey = adjustedAmount.to_str();
+        if (observedFees.has(amountKey)) {
+          // A coin-width boundary can make the required fee oscillate: the
+          // larger coin costs more, which pushes the coin below the boundary,
+          // which lowers the fee and pushes it back above. Keep the lower
+          // coin and reserve the highest observed fee so the selection stays
+          // funded instead of undercharging one side of the cycle.
+          const highestObservedFee = [
+            ...observedFees.values(),
+            changeOutputCost.outputFee,
+          ].reduce((highest, fee) =>
+            fee.compare(highest) > 0 ? fee : highest,
+          );
+          changeOutputAmount = bigNumFromStr(
+            [
+              ...observedFees.keys(),
+              changeOutputAmount.to_str(),
+              amountKey,
+            ].reduce((lowest, amount) =>
+              bigNumFromStr(amount).compare(bigNumFromStr(lowest)) < 0
+                ? amount
+                : lowest,
+            ),
+          );
+          partialChange.amount = changeOutputAmount.to_str();
+          changeOutputCost = getOutputCost(
+            txBuilder,
+            partialChange,
+            changeAddress,
+          );
+          changeOutputCost = {
+            ...changeOutputCost,
+            outputFee: highestObservedFee,
+          };
+          break;
+        }
+
+        observedFees.set(
+          changeOutputAmount.to_str(),
+          changeOutputCost.outputFee,
+        );
+        changeOutputAmount = adjustedAmount;
+      }
     }
     return changeOutputCost;
   });
@@ -552,6 +656,7 @@ export const prepareChangeOutput = (
       assets: changeOutputAssets,
     },
     changeAddress,
+    true,
   );
 
   // calculate change output amount as utxosTotalAmount - totalOutputAmount - totalFeesAmount - change output fee
@@ -619,10 +724,18 @@ export const prepareChangeOutput = (
   return null;
 };
 
-export const getTxBuilder = (a = '44'): CardanoWasm.TransactionBuilder =>
+export const getTxBuilder = (
+  a: string = DEFAULT_FEE_PARAMS.a,
+): CardanoWasm.TransactionBuilder =>
   CardanoWasm.TransactionBuilder.new(
     CardanoWasm.TransactionBuilderConfigBuilder.new()
-      .fee_algo(CardanoWasm.LinearFee.new(BigInt(a), BigInt(155381), BigInt(0)))
+      .fee_algo(
+        CardanoWasm.LinearFee.new(
+          BigInt(a),
+          BigInt(DEFAULT_FEE_PARAMS.b),
+          BigInt(0),
+        ),
+      )
       .pool_deposit(BigInt(500000000))
       .key_deposit(BigInt(2000000))
       .coins_per_utxo_byte(BigInt(CARDANO_PARAMS.COINS_PER_UTXO_BYTE))

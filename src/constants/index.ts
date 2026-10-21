@@ -29,6 +29,11 @@ export const ERROR = {
   },
 } as const;
 
+export const DEFAULT_FEE_PARAMS = {
+  a: '44',
+  b: '155381',
+} as const;
+
 export const CARDANO_PARAMS = {
   PROTOCOL_MAGICS: {
     mainnet: CardanoWasm.NetworkInfo.mainnet().protocol_magic(),
@@ -44,11 +49,6 @@ export const CARDANO_PARAMS = {
   MAX_TX_SIZE: 16384,
   MAX_VALUE_SIZE: 5000,
 } as const;
-
-// https://github.com/vacuumlabs/adalite/blob/d8ba3bb1ff439ae8e02abd99163435a989d97961/app/frontend/wallet/shelley/transaction/constants.ts
-// policyId is 28 bytes, assetName max 32 bytes, together with quantity makes
-// max token size about 70 bytes, max output size is 4000 => 4000 / 70 ~ 50
-export const MAX_TOKENS_PER_OUTPUT = 50;
 
 export const DATA_COST_PER_UTXO_BYTE = BigInt(
   CARDANO_PARAMS.COINS_PER_UTXO_BYTE,

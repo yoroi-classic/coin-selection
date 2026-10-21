@@ -1,5 +1,7 @@
 import * as CardanoWasm from '../../src/utils/cardano';
 import * as utils from '../../src/utils/common';
+import { DATA_COST_PER_UTXO_BYTE } from '../../src/constants';
+import { coinSelection } from '../../src';
 import * as fixtures from './fixtures/common';
 import { changeAddress } from '../fixtures/constants';
 
@@ -73,33 +75,48 @@ describe('common utils', () => {
   });
 
   test.each([
-    { assetCount: 50, expectedBundleSizes: [50] },
-    { assetCount: 51, expectedBundleSizes: [50, 1] },
+    { assetCount: 51, expectedBundleSizes: [51] },
+    { assetCount: 142, expectedBundleSizes: [141, 1] },
   ])(
-    'splitChangeOutput keeps at most 50 assets for $assetCount assets',
+    'splitChangeOutput respects the serialized value limit for $assetCount assets',
     ({ assetCount, expectedBundleSizes }) => {
       const policyId =
         '02477d7c23b4c2834b0be8ca8578dde47af0cc82a964688f6fc95a7a';
       const assets = Array.from({ length: assetCount }, (_, index) => ({
         quantity: '1',
-        unit: `${policyId}${index.toString(16).padStart(2, '0')}`,
+        unit: `${policyId}${index.toString(16).padStart(64, '0')}`,
       }));
       const txBuilder = utils.getTxBuilder();
-      const original = utils.getOutputCost(
-        txBuilder,
-        {
-          address: changeAddress,
-          amount: '100000000',
-          assets,
-          setMax: false,
-        },
-        changeAddress,
-      );
+      const original = {
+        output: CardanoWasm.TransactionOutput.new(
+          CardanoWasm.Address.from_bech32(changeAddress),
+          CardanoWasm.Value.new(
+            BigInt(100000000),
+            utils.buildMultiAsset(assets),
+          ),
+        ),
+        outputFee: CardanoWasm.BigNum.from_bigint(BigInt(0)),
+        minOutputAmount: CardanoWasm.BigNum.from_bigint(BigInt(0)),
+      };
 
       const split = utils.splitChangeOutput(txBuilder, original, changeAddress);
       const bundleAssets = split.map(item =>
         utils.multiAssetToArray(item.output.amount().multi_asset()),
       );
+      expect(bundleAssets.map(bundle => bundle.length)).toEqual(
+        expectedBundleSizes,
+      );
+      expect(
+        bundleAssets.every(
+          bundle =>
+            CardanoWasm.Value.new(
+              BigInt(100000000),
+              utils.buildMultiAsset(bundle),
+            ).to_cbor_bytes().length <= 5000,
+        ),
+      ).toBe(true);
+      expect(bundleAssets.flat()).toEqual(assets);
+
       const originalCost =
         original.output.amount().coin() + original.outputFee.to_bigint();
       const splitCost = split.reduce(
@@ -107,15 +124,123 @@ describe('common utils', () => {
           sum + item.output.amount().coin() + item.outputFee.to_bigint(),
         BigInt(0),
       );
-
-      expect(bundleAssets.map(bundle => bundle.length)).toEqual(
-        expectedBundleSizes,
-      );
-      expect(bundleAssets.every(bundle => bundle.length <= 50)).toBe(true);
-      expect(bundleAssets.flat()).toEqual(assets);
       expect(splitCost).toBe(originalCost);
     },
   );
+
+  test.each([false, true])(
+    'coinSelection splits oversized change values (forceLargestFirstSelection=%s)',
+    forceLargestFirstSelection => {
+      const policyId =
+        '02477d7c23b4c2834b0be8ca8578dde47af0cc82a964688f6fc95a7a';
+      const makeAssets = (start: number) =>
+        Array.from({ length: 100 }, (_, index) => ({
+          quantity: '1',
+          unit: `${policyId}${(start + index).toString(16).padStart(64, '0')}`,
+        }));
+      const inputUtxos = [0, 1].map(index => ({
+        address: changeAddress,
+        txHash: (index + 1).toString(16).padStart(64, '0'),
+        outputIndex: 0,
+        amount: [
+          { quantity: '40000000', unit: 'lovelace' },
+          ...makeAssets(index * 100),
+        ],
+      }));
+
+      inputUtxos.forEach(utxo => {
+        const value = CardanoWasm.Value.new(
+          BigInt(utxo.amount[0].quantity),
+          utils.buildMultiAsset(utxo.amount.slice(1)),
+        );
+        expect(value.to_cbor_bytes().length).toBeGreaterThan(3500);
+        expect(value.to_cbor_bytes().length).toBeLessThan(3600);
+      });
+
+      const result = coinSelection(
+        {
+          utxos: inputUtxos,
+          outputs: [{ address: changeAddress, amount: '40500000', assets: [] }],
+          changeAddress,
+          certificates: [],
+          withdrawals: [],
+          accountPubKey:
+            'ec8fdf616242f430855ad7477acda53395eb30c295f5a7ef038712578877375b5a2f00353c9c5cc88c7ff18e71dc08724d90fc238213b789c0b02438e336be07',
+        },
+        { forceLargestFirstSelection },
+      );
+
+      expect(result.type).toBe('final');
+      if (result.type !== 'final') return;
+
+      const changeOutputs = result.outputs.filter(output => output.isChange);
+      expect(changeOutputs.length).toBeGreaterThan(1);
+      expect(
+        changeOutputs.every(
+          output =>
+            CardanoWasm.Value.new(
+              BigInt(output.amount),
+              utils.buildMultiAsset(output.assets),
+            ).to_cbor_bytes().length <= 5000,
+        ),
+      ).toBe(true);
+      const outputAddress = CardanoWasm.Address.from_bech32(changeAddress);
+      expect(
+        changeOutputs.every(output => {
+          const value = CardanoWasm.Value.new(
+            BigInt(output.amount),
+            utils.buildMultiAsset(output.assets),
+          );
+          const txOutput = CardanoWasm.TransactionOutput.new(
+            outputAddress,
+            value,
+          );
+          const minimumAda = CardanoWasm.min_ada_required(
+            txOutput,
+            DATA_COST_PER_UTXO_BYTE,
+          );
+          return BigInt(output.amount) >= minimumAda;
+        }),
+      ).toBe(true);
+
+      const inputAssets = inputUtxos.flatMap(utxo =>
+        utxo.amount.filter(asset => asset.unit !== 'lovelace'),
+      );
+      const changeAssets = changeOutputs.flatMap(output => output.assets);
+      expect(changeAssets).toEqual(inputAssets);
+
+      const inputLovelace = inputUtxos.reduce(
+        (sum, utxo) =>
+          sum +
+          BigInt(
+            utxo.amount.find(asset => asset.unit === 'lovelace')!.quantity,
+          ),
+        BigInt(0),
+      );
+      const outputLovelace = result.outputs.reduce(
+        (sum, output) => sum + BigInt(output.amount),
+        BigInt(0),
+      );
+      expect(inputLovelace).toBe(outputLovelace + BigInt(result.fee));
+    },
+  );
+
+  test('rejects oversized user output values', () => {
+    const policyId = '02477d7c23b4c2834b0be8ca8578dde47af0cc82a964688f6fc95a7a';
+    const assets = Array.from({ length: 142 }, (_, index) => ({
+      quantity: '1',
+      unit: `${policyId}${index.toString(16).padStart(64, '0')}`,
+    }));
+    const txBuilder = utils.getTxBuilder();
+
+    expect(() =>
+      utils.getOutputCost(
+        txBuilder,
+        { address: changeAddress, amount: '1000000', assets },
+        changeAddress,
+      ),
+    ).toThrow('Max value size');
+  });
 
   fixtures.filterUtxos.forEach(f => {
     test(f.description, () => {
