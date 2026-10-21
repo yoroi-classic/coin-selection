@@ -530,9 +530,10 @@ export const splitChangeOutput = (
 
     if (i === changeOutputs.length - 1) {
       // add all unused ADA to the last change output
-      let changeOutputAmount = lovelaceAvailable.checked_add(
+      const availableForLastOutput = lovelaceAvailable.checked_add(
         bigNumFromStr(partialChange.amount),
       );
+      let changeOutputAmount = availableForLastOutput;
 
       if (changeOutputAmount.compare(changeOutputCost.minOutputAmount) < 0) {
         // computed change amount would be below minUtxoValue
@@ -540,6 +541,27 @@ export const splitChangeOutput = (
         changeOutputAmount = changeOutputCost.minOutputAmount;
       }
       partialChange.amount = changeOutputAmount.to_str();
+
+      // The fee can grow when the final coin crosses a CBOR integer-width
+      // boundary. That extra fee must come out of this output's coin, not be
+      // left as an unfunded requirement for the selection algorithm.
+      const feeAtMinimumCoin = changeOutputCost.outputFee;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        changeOutputCost = getOutputCost(
+          txBuilder,
+          partialChange,
+          changeAddress,
+        );
+        const feeDelta =
+          changeOutputCost.outputFee.to_bigint() -
+          feeAtMinimumCoin.to_bigint();
+        const adjustedAmount = bigNumFromBigInt(
+          availableForLastOutput.to_bigint() - feeDelta,
+        );
+        if (adjustedAmount.compare(changeOutputAmount) === 0) break;
+        changeOutputAmount = adjustedAmount;
+        partialChange.amount = changeOutputAmount.to_str();
+      }
       changeOutputCost = getOutputCost(txBuilder, partialChange, changeAddress);
     }
     return changeOutputCost;

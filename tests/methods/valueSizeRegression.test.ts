@@ -185,5 +185,54 @@ describe.each([
       expect(change).toHaveLength(2);
       assertFeeIsMinimumForSerializedTransaction(result);
     });
+
+    test('reserves the larger final-output fee when change crosses 2^32 lovelace', () => {
+      const assets = createAssets(142, 20);
+      const result = select(
+        createUtxos('5000000000', assets),
+        '5500000000',
+        forceLargestFirst,
+      );
+
+      expect(result.type).toBe('final');
+      if (result.type !== 'final') return;
+      sanityCheck(result);
+      const change = result.outputs.filter(output => output.isChange);
+      expect(change).toHaveLength(2);
+      expect(BigInt(change[1].amount)).toBeGreaterThan(2n ** 32n);
+      assertFeeIsMinimumForSerializedTransaction(result);
+    });
+
+    test('splits a 5,001-byte combined change value at the protocol limit', () => {
+      const assets = createAssets(142, 21);
+      const unsplitChangeValue = buildTxOutput(
+        { address: changeAddress, amount: '50000000', assets },
+        changeAddress,
+      )
+        .amount()
+        .to_cbor_bytes();
+      expect(unsplitChangeValue.length).toBe(5001);
+      const result = select(
+        createUtxos('40000000', assets),
+        '40500000',
+        forceLargestFirst,
+      );
+
+      expect(result.type).toBe('final');
+      if (result.type !== 'final') return;
+      sanityCheck(result);
+      const change = result.outputs.filter(output => output.isChange);
+      expect(change).toHaveLength(2);
+      const body = TransactionBody.from_cbor_bytes(
+        Buffer.from(result.tx.body, 'hex'),
+      );
+      for (const output of change) {
+        const outputIndex = result.outputs.indexOf(output);
+        expect(
+          body.outputs().get(outputIndex).amount().to_cbor_bytes().length,
+        ).toBeLessThanOrEqual(5000);
+      }
+      assertFeeIsMinimumForSerializedTransaction(result);
+    });
   },
 );
